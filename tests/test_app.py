@@ -60,3 +60,14 @@ async def test_a_narrow_pane_hides_the_files_and_f_brings_them_back(tmp_path):
         assert app.query_one("#files").has_class("hidden")
         await pilot.press("f")
         assert not app.query_one("#files").has_class("hidden")
+
+
+async def test_a_theme_change_redraws_without_doubling_turns(tmp_path):
+    t = tmp_path / "s.jsonl"
+    t.write_text(lines({"type": "user", "message": {"content": "one"}}))
+    app = BriefPane(ClaudeAdapter(), tmp_path, path=t)
+    async with app.run_test() as pilot:
+        await pilot.pause(0.6)
+        await pilot.press("t")
+        await pilot.pause(0.6)
+        assert len(app.query(".turn")) == 1

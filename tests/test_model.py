@@ -55,3 +55,16 @@ def test_the_goal_is_the_first_prompt_and_now_the_latest_answer():
     s.add(AssistantText("answer: offered two times\nyou: pick one"))
     assert s.goal == "book a demo"
     assert s.latest_reply.answer == "offered two times" and s.latest_reply.you == "pick one"
+
+
+def test_more_splits_into_numbered_pulls_and_code_loses_its_backticks():
+    from briefpane.themes import PALETTES
+    from briefpane.view import inline, pulls
+
+    assert pulls("1 test the Codex launch · 2 remove the `focus` mod") == [
+        ("1", "test the Codex launch"),
+        ("2", "remove the `focus` mod"),
+    ]
+    assert pulls("just a note") == [("", "just a note")]
+    pal = next(iter(PALETTES.values()))
+    assert inline("run `briefpane claude` now", "", pal).plain == "run briefpane claude now"

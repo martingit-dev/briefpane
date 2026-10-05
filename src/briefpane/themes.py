@@ -2,6 +2,8 @@
 
 from textual.theme import Theme
 
+from .view import Palette
+
 MATRIX = Theme(
     name="matrix",
     primary="#00ff41",
@@ -49,3 +51,15 @@ LIGHT = Theme(
 
 THEMES = {"matrix": MATRIX, "dark": DARK, "light": LIGHT}
 ORDER = list(THEMES)
+
+PALETTES = {
+    MATRIX.name: Palette(
+        text="#2fd65a", dim="#1b7a36", strong="#b6ffb0", prompt="#e8ffe8", code="#d4ff3a"
+    ),
+    DARK.name: Palette(
+        text="#cfcfcf", dim="#7a7a7a", strong="#ffffff", prompt="#7fb4ff", code="#e0b252"
+    ),
+    LIGHT.name: Palette(
+        text="#2b2b2b", dim="#8a8a8a", strong="#000000", prompt="#1f5fbf", code="#8a4f00"
+    ),
+}

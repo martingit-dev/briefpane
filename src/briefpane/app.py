@@ -14,7 +14,7 @@ from . import view
 from .adapters import Adapter
 from .model import Session
 from .tail import Tail
-from .themes import ORDER, THEMES
+from .themes import ORDER, PALETTES, THEMES
 
 _POLL_S = 0.4
 # Below this width the files pane would squeeze the conversation; `f` still shows it.
@@ -25,7 +25,8 @@ class BriefPane(App):
     CSS = """
     #band { height: auto; padding: 0 1; background: $panel; color: $foreground; }
     #main { height: 1fr; }
-    #convo { width: 1fr; padding: 1 2 0 1; }
+    #convo { width: 1fr; padding: 1 2 0 1; scrollbar-size-vertical: 1;
+             scrollbar-color: $panel; scrollbar-background: $background; }
     #files { width: 42; padding: 1 1; border-left: solid $panel; }
     #files.hidden { display: none; }
     .turn { margin-bottom: 0; }
@@ -53,6 +54,8 @@ class BriefPane(App):
         self.start_theme = theme
         self.session = Session()
         self.rendered = 0
+        # One redraw at a time: two interleaved ones would each mount the new turns.
+        self.drawing = asyncio.Lock()
 
     def compose(self) -> ComposeResult:
         yield Static(id="band")
@@ -87,25 +90,39 @@ class BriefPane(App):
             await asyncio.sleep(_POLL_S)
 
     async def redraw(self) -> None:
+        async with self.drawing:
+            await self._redraw()
+
+    async def _redraw(self) -> None:
         convo = self.query_one("#convo", VerticalScroll)
         at_end = convo.scroll_offset.y >= convo.max_scroll_y - 2
         widgets = list(convo.query(".turn"))
         # Earlier turns are final; only the last one rendered can still grow.
         start = max(0, self.rendered - 1)
         for i in range(start, len(self.session.turns)):
-            body = view.turn(self.session.turns[i])
+            body = view.turn(self.session.turns[i], i + 1, self.palette)
             if i < len(widgets):
                 widgets[i].update(body)
             else:
                 await convo.mount(Static(body, classes="turn"))
         self.rendered = len(self.session.turns)
         width = self.size.width or 200
-        self.query_one("#band", Static).update(view.band(self.session, width))
+        self.query_one("#band", Static).update(view.band(self.session, self.palette, width))
         rows = self.size.height or 40
-        self.files_view = view.files(self.session, self.cwd, rows)
+        self.files_view = view.files(self.session, self.cwd, self.palette, rows)
         self.query_one("#files", Static).update(self.files_view)
         if at_end:
             convo.scroll_end(animate=False)
+
+    @property
+    def palette(self) -> view.Palette:
+        return PALETTES.get(self.theme, PALETTES[THEMES["matrix"].name])
+
+    def watch_theme(self) -> None:
+        # Colours are baked into each turn; a new theme redraws them all.
+        self.rendered = 0
+        if self.is_mounted:
+            self.call_after_refresh(self.run_worker, self.redraw())
 
     def on_resize(self, event) -> None:
         self.query_one("#files").set_class(event.size.width < _FILES_MIN_WIDTH, "hidden")

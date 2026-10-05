@@ -71,3 +71,20 @@ def test_find_skips_sessions_that_existed_before_the_launch(tmp_path):
     mine.write_text("{}\n")
     other.write_text("{}\n{}\n")  # the busy session keeps writing
     assert a.find(Path("/r"), exclude=existing) == mine
+
+
+def test_full_hides_the_agent_in_its_own_window_and_briefpane_types_into_it():
+    before, final = tmux_plan("full", True, AGENT, VIEWER, CWD, Config())
+    [[tmux, new_window, d, n, name, *_rest]] = before
+    assert (tmux, new_window, d, n) == ("tmux", "new-window", "-d", "-n")
+    assert final == [*VIEWER, "--agent-pane", f":{name}"] and before[0][-1] == "claude"
+    _, outside = tmux_plan("full", False, AGENT, VIEWER, CWD, Config())
+    assert outside[:2] == ["tmux", "new-session"] and "new-window" in outside
+
+
+def test_a_menu_on_the_agent_screen_is_noticed_and_a_prompt_is_not():
+    from briefpane.agentpane import waiting_menu
+
+    menu = "Do you want to make this edit?\n ❯ 1. Yes\n   2. No\nEsc to cancel"
+    assert "1. Yes" in waiting_menu("old output\n" + menu)
+    assert waiting_menu("❯ \n  auto mode on") is None

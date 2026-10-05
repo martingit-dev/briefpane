@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 from . import __version__
@@ -26,11 +27,12 @@ def _view(argv: list[str]) -> None:
     p.add_argument("--file", type=Path, help="a transcript to follow instead of the newest")
     p.add_argument("--since", type=float, default=0.0, help=argparse.SUPPRESS)
     p.add_argument("--new", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--agent-pane", help=argparse.SUPPRESS)
     p.add_argument("--theme", choices=sorted(THEMES), default=load().theme)
     a = p.parse_args(argv)
     from .app import run
 
-    run(get(a.agent), a.cwd.resolve(), a.since, a.file, a.theme, a.new)
+    run(get(a.agent), a.cwd.resolve(), a.since, a.file, a.theme, a.new, a.agent_pane)
 
 
 def tmux_plan(
@@ -41,8 +43,26 @@ def tmux_plan(
     cwd: Path,
     cfg: Config,
 ) -> tuple[list[list[str]], list[str]]:
-    """The tmux commands to run first, then the argv to exec. The agent keeps
-    the pane you type in, so its input, slash commands and approvals are its own."""
+    """The tmux commands to run first, then the argv to exec. In bottom and side
+    the agent keeps the pane you type in; in full it runs in a hidden window and
+    briefpane types into it."""
+    if layout == "full":
+        name = f"bp-{uuid.uuid4().hex[:6]}"
+        hidden = ["new-window", "-d", "-n", name, "-c", str(cwd), shlex.join(agent_cmd)]
+        target = [*viewer, "--agent-pane", f":{name}" if in_tmux else f"{name}:{name}"]
+        if in_tmux:
+            return [["tmux", *hidden]], target
+        return [], [
+            "tmux",
+            "new-session",
+            "-s",
+            name,
+            "-c",
+            str(cwd),
+            shlex.join(target),
+            ";",
+            *hidden,
+        ]
     if layout == "bottom":
         # -b puts briefpane above the agent; the agent keeps agent_height rows.
         split = ["split-window", "-v", "-b", "-d", "-l", _complement(cfg.agent_height)]

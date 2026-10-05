@@ -7,11 +7,13 @@ from pathlib import Path
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Footer, Static
+from textual.widgets import Footer, Input, Static
 
 from . import view
 from .adapters import Adapter
+from .agentpane import AgentPane, waiting_menu
 from .model import Session
 from .tail import Tail
 from .themes import ORDER, PALETTES, THEMES
@@ -29,13 +31,21 @@ class BriefPane(App):
              scrollbar-color: $panel; scrollbar-background: $background; }
     #files { width: 42; padding: 1 1; border-left: solid $panel; }
     #files.hidden { display: none; }
+    #menu { height: auto; max-height: 16; padding: 0 1; margin: 0 1; border: round $accent; }
+    #menu.hidden { display: none; }
+    #prompt { margin: 0 1; border: tall $panel; }
+    #prompt:focus { border: tall $primary; }
     .turn { margin-bottom: 0; }
     """
+    # Ctrl keys, since plain letters belong to the input box; priority so the
+    # input's own editing keys do not swallow them.
     BINDINGS: ClassVar = [
-        ("t", "cycle_theme", "theme"),
-        ("f", "toggle_files", "files"),
-        ("end", "scroll_end", "latest"),
-        ("q", "quit", "quit"),
+        Binding("escape", "interrupt", "stop / cancel", priority=True),
+        Binding("ctrl+o", "show_agent", "agent screen", priority=True),
+        Binding("ctrl+t", "cycle_theme", "theme", priority=True),
+        Binding("ctrl+f", "toggle_files", "files", priority=True),
+        Binding("end", "scroll_end", "latest"),
+        Binding("ctrl+q", "quit", "quit", priority=True),
     ]
 
     def __init__(
@@ -46,6 +56,7 @@ class BriefPane(App):
         path: Path | None = None,
         theme: str = "matrix",
         new_only: bool = False,
+        agent: str | None = None,
     ):
         super().__init__()
         self.adapter = adapter
@@ -54,6 +65,8 @@ class BriefPane(App):
         self.path = path
         self.start_theme = theme
         self.new_only = new_only
+        self.agent = AgentPane(agent) if agent else None
+        self.menu_open = False
         self.session = Session()
         self.rendered = 0
         # One redraw at a time: two interleaved ones would each mount the new turns.
@@ -64,6 +77,9 @@ class BriefPane(App):
         with Horizontal(id="main"):
             yield VerticalScroll(id="convo")
             yield Static(id="files")
+        if self.agent:
+            yield Static(id="menu", classes="hidden")
+            yield Input(id="prompt", placeholder="message the agent · @file and /commands work")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -75,6 +91,9 @@ class BriefPane(App):
             view.Text(f"waiting for a {self.adapter.name} session in {self.cwd}", style="dim")
         )
         self.run_worker(self.follow(), exclusive=True)
+        if self.agent:
+            self.run_worker(self.watch_agent())
+            self.query_one("#prompt", Input).focus()
 
     async def follow(self) -> None:
         existing = frozenset(self.adapter.transcripts(self.cwd)) if self.new_only else frozenset()
@@ -91,6 +110,49 @@ class BriefPane(App):
                         self.session.add(event)
                 await self.redraw()
             await asyncio.sleep(_POLL_S)
+
+    async def watch_agent(self) -> None:
+        """Surface the agent's menus here, and close when the agent exits."""
+        await self.agent.started()
+        while await self.agent.alive():
+            menu = waiting_menu(await self.agent.screen())
+            box = self.query_one("#menu", Static)
+            self.menu_open = menu is not None
+            box.set_class(menu is None, "hidden")
+            if menu:
+                box.update(view.Text(menu))
+            prompt = self.query_one("#prompt", Input)
+            prompt.placeholder = (
+                "the agent is asking: type an option number, or Enter to accept"
+                if menu
+                else "message the agent · @file and /commands work"
+            )
+            await asyncio.sleep(0.7)
+        self.exit()
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        text = event.value
+        event.input.value = ""
+        if self.menu_open and (text.isdigit() or not text):
+            # A menu takes the keypress itself, not a typed message.
+            await self.agent.key(text or "Enter")
+        else:
+            await self.agent.send(text)
+        self.action_scroll_end()
+
+    async def action_quit(self) -> None:
+        # briefpane is the agent's only window: quitting it ends the agent too.
+        if self.agent:
+            await self.agent.close()
+        self.exit()
+
+    async def action_interrupt(self) -> None:
+        if self.agent:
+            await self.agent.key("Escape")
+
+    async def action_show_agent(self) -> None:
+        if self.agent:
+            await self.agent.show()
 
     async def redraw(self) -> None:
         async with self.drawing:
@@ -143,6 +205,12 @@ class BriefPane(App):
 
 
 def run(
-    adapter: Adapter, cwd: Path, since: float, path: Path | None, theme: str, new_only: bool
+    adapter: Adapter,
+    cwd: Path,
+    since: float,
+    path: Path | None,
+    theme: str,
+    new_only: bool,
+    agent: str | None = None,
 ) -> None:
-    BriefPane(adapter, cwd, since, path, theme, new_only).run()
+    BriefPane(adapter, cwd, since, path, theme, new_only, agent).run()

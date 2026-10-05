@@ -7,15 +7,15 @@ import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
 
-LAYOUTS = ("bottom", "side")
+LAYOUTS = ("full", "bottom", "side")
 
 
 @dataclass
 class Config:
     theme: str = "matrix"
-    # bottom: briefpane fills the window, the agent is a strip below where you
-    # type. side: the agent on the left, briefpane on the right.
-    layout: str = "bottom"
+    # full: only briefpane; you type in it and the agent runs hidden. bottom:
+    # the agent is a strip below where you type. side: agent left, briefpane right.
+    layout: str = "full"
     agent_height: str = "30%"
     pane_width: str = "40%"
 

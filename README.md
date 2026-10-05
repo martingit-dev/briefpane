@@ -25,20 +25,23 @@ briefpane view claude       # just the pane, on the newest session in this direc
 briefpane view codex --file ~/.codex/sessions/2026/10/05/rollout-....jsonl
 ```
 
-You keep typing in the agent itself, so `@` file references, slash commands,
-approvals and menus all work as usual; briefpane only changes what you read.
-
 Layouts:
 
-- `bottom` (default): briefpane fills the window, the agent is a strip below where you type.
+- `full` (default): only briefpane. You type in its box; the agent runs hidden
+  in a background tmux window and receives what you type, so `@file` references
+  and slash commands reach the real agent. When the agent shows a menu or asks
+  for approval, it appears in briefpane: type the option number, or Enter.
+- `bottom`: briefpane fills the window, the agent is a strip below where you type.
 - `side`: the agent on the left, briefpane on the right.
 
 Inside tmux briefpane splits the current window; outside it, it opens a new
 tmux session with both.
 
-Keys: `t` theme, `f` files pane, `End` latest turn, `q` quit.
+Keys: `Esc` stop the agent or cancel its menu, `Ctrl+O` jump to the agent's own
+screen, `Ctrl+T` theme, `Ctrl+F` files pane, `End` latest turn, `Ctrl+Q` quit
+(ends the hidden agent too).
 
-Themes: `matrix` (default), `dark`, `light`. Pick one with `--theme`, or cycle with `t`.
+Themes: `matrix` (default), `dark`, `light`. Pick one with `--theme`, or cycle with `Ctrl+T`.
 
 ## Config
 
@@ -46,7 +49,7 @@ Themes: `matrix` (default), `dark`, `light`. Pick one with `--theme`, or cycle w
 
 ```toml
 theme = "matrix"        # matrix | dark | light
-layout = "bottom"       # bottom | side
+layout = "full"         # full | bottom | side
 agent_height = "30%"    # the agent's strip in the bottom layout
 pane_width = "40%"      # briefpane's width in the side layout
 ```

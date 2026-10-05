@@ -25,11 +25,12 @@ def _view(argv: list[str]) -> None:
     p.add_argument("--cwd", type=Path, default=Path.cwd())
     p.add_argument("--file", type=Path, help="a transcript to follow instead of the newest")
     p.add_argument("--since", type=float, default=0.0, help=argparse.SUPPRESS)
+    p.add_argument("--new", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--theme", choices=sorted(THEMES), default=load().theme)
     a = p.parse_args(argv)
     from .app import run
 
-    run(get(a.agent), a.cwd.resolve(), a.since, a.file, a.theme)
+    run(get(a.agent), a.cwd.resolve(), a.since, a.file, a.theme, a.new)
 
 
 def tmux_plan(
@@ -64,7 +65,13 @@ def _launch(agent: str, rest: list[str], theme: str, layout: str, cfg: Config) -
     since = time.time() - 1
     viewer = [sys.executable, "-m", "briefpane", "view", agent, "--cwd", str(cwd)]
     viewer += ["--since", str(since), "--theme", theme]
-    agent_cmd = [adapter.command, *rest]
+    args, transcript = adapter.prepare(rest, cwd)
+    if transcript is not None:
+        viewer += ["--file", str(transcript)]
+    elif not adapter.resumes(rest):
+        # Only a session that did not exist at launch can be this run's.
+        viewer += ["--new"]
+    agent_cmd = [adapter.command, *args]
     if not shutil.which(adapter.command):
         raise SystemExit(f"briefpane: {adapter.command!r} is not on PATH")
     in_tmux = bool(os.environ.get("TMUX"))

@@ -31,6 +31,9 @@ class CodexAdapter(Adapter):
     def __init__(self, root: Path | None = None):
         self.root = root or Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "sessions"
 
+    def resumes(self, args: list[str]) -> bool:
+        return bool(args) and args[0] in ("resume", "fork")
+
     def transcripts(self, cwd: Path) -> list[Path]:
         if not self.root.is_dir():
             return []

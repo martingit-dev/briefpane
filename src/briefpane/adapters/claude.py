@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import re
+import uuid
 from pathlib import Path
 
 from ..model import AssistantText, Event, ToolUse, UserText
@@ -37,6 +38,19 @@ class ClaudeAdapter(Adapter):
 
     def __init__(self, root: Path | None = None):
         self.root = root
+
+    _RESUME = ("-r", "--resume", "-c", "--continue", "--session-id")
+
+    def resumes(self, args: list[str]) -> bool:
+        return any(a.split("=")[0] in self._RESUME for a in args)
+
+    def prepare(self, args: list[str], cwd: Path) -> tuple[list[str], Path | None]:
+        # Naming the session up front is the only sure way to tell it apart
+        # from other Claude sessions running in the same folder.
+        if self.resumes(args):
+            return args, None
+        sid = str(uuid.uuid4())
+        return ["--session-id", sid, *args], project_dir(cwd, self.root) / f"{sid}.jsonl"
 
     def transcripts(self, cwd: Path) -> list[Path]:
         folder = project_dir(cwd, self.root)

@@ -45,6 +45,7 @@ class BriefPane(App):
         since: float = 0.0,
         path: Path | None = None,
         theme: str = "matrix",
+        new_only: bool = False,
     ):
         super().__init__()
         self.adapter = adapter
@@ -52,6 +53,7 @@ class BriefPane(App):
         self.since = since
         self.path = path
         self.start_theme = theme
+        self.new_only = new_only
         self.session = Session()
         self.rendered = 0
         # One redraw at a time: two interleaved ones would each mount the new turns.
@@ -75,8 +77,9 @@ class BriefPane(App):
         self.run_worker(self.follow(), exclusive=True)
 
     async def follow(self) -> None:
+        existing = frozenset(self.adapter.transcripts(self.cwd)) if self.new_only else frozenset()
         while self.path is None:
-            self.path = self.adapter.find(self.cwd, self.since)
+            self.path = self.adapter.find(self.cwd, self.since, existing)
             if self.path is None:
                 await asyncio.sleep(_POLL_S)
         tail = Tail(self.path)
@@ -139,5 +142,7 @@ class BriefPane(App):
         self.query_one("#convo", VerticalScroll).scroll_end(animate=False)
 
 
-def run(adapter: Adapter, cwd: Path, since: float, path: Path | None, theme: str) -> None:
-    BriefPane(adapter, cwd, since, path, theme).run()
+def run(
+    adapter: Adapter, cwd: Path, since: float, path: Path | None, theme: str, new_only: bool
+) -> None:
+    BriefPane(adapter, cwd, since, path, theme, new_only).run()

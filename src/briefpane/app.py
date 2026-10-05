@@ -3,22 +3,47 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import ClassVar
 
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Footer, Input, Static
+from textual.widgets import Footer, Input, OptionList, Static
 
 from . import view
 from .adapters import Adapter
 from .agentpane import AgentPane, waiting_menu
+from .files import list_files, matches
 from .model import Session
 from .tail import Tail
 from .themes import ORDER, PALETTES, THEMES
 
 _POLL_S = 0.4
+_AT = re.compile(r"@([\w./-]*)$")
+
+
+class PromptInput(Input):
+    """The message box. While `@` suggestions show, Tab takes the highlighted
+    one and the arrows move the highlight."""
+
+    async def _on_key(self, event: events.Key) -> None:
+        box = self.app.query_one("#suggest", OptionList)
+        if box.display and event.key in ("tab", "up", "down"):
+            event.prevent_default()
+            event.stop()
+            if event.key == "tab":
+                self.app.take_suggestion()
+            elif event.key == "down":
+                box.action_cursor_down()
+            else:
+                box.action_cursor_up()
+            return
+        await super()._on_key(event)
+
+
 # Below this width the files pane would squeeze the conversation; `f` still shows it.
 _FILES_MIN_WIDTH = 110
 
@@ -33,6 +58,7 @@ class BriefPane(App):
     #files.hidden { display: none; }
     #menu { height: auto; max-height: 16; padding: 0 1; margin: 0 1; border: round $accent; }
     #menu.hidden { display: none; }
+    #suggest { height: auto; max-height: 10; margin: 0 1; border: round $panel; display: none; }
     #prompt { margin: 0 1; border: tall $panel; }
     #prompt:focus { border: tall $primary; }
     .turn { margin-bottom: 0; }
@@ -67,6 +93,7 @@ class BriefPane(App):
         self.new_only = new_only
         self.agent = AgentPane(agent) if agent else None
         self.menu_open = False
+        self.files_index: list[str] | None = None
         self.session = Session()
         self.rendered = 0
         # One redraw at a time: two interleaved ones would each mount the new turns.
@@ -79,7 +106,10 @@ class BriefPane(App):
             yield Static(id="files")
         if self.agent:
             yield Static(id="menu", classes="hidden")
-            yield Input(id="prompt", placeholder="message the agent · @file and /commands work")
+            yield OptionList(id="suggest")
+            yield PromptInput(
+                id="prompt", placeholder="message the agent · @file and /commands work"
+            )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -130,7 +160,36 @@ class BriefPane(App):
             await asyncio.sleep(0.7)
         self.exit()
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        box = self.query_one("#suggest", OptionList)
+        m = _AT.search(event.value[: event.input.cursor_position])
+        if m is None:
+            box.display = False
+            return
+        if self.files_index is None:
+            self.files_index = list_files(self.cwd)
+        found = matches(self.files_index, m.group(1))
+        box.clear_options()
+        box.add_options(found)
+        box.display = bool(found)
+        if found:
+            box.highlighted = 0
+
+    def take_suggestion(self) -> None:
+        box = self.query_one("#suggest", OptionList)
+        prompt = self.query_one("#prompt", Input)
+        if box.highlighted is None:
+            return
+        chosen = str(box.get_option_at_index(box.highlighted).prompt)
+        head = prompt.value[: prompt.cursor_position]
+        tail = prompt.value[prompt.cursor_position :]
+        head = _AT.sub(lambda _: f"@{chosen} ", head)
+        prompt.value = head + tail
+        prompt.cursor_position = len(head)
+        box.display = False
+
     async def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.query_one("#suggest", OptionList).display = False
         text = event.value
         event.input.value = ""
         if self.menu_open and (text.isdigit() or not text):

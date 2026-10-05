@@ -6,8 +6,9 @@ from __future__ import annotations
 import asyncio
 import re
 
-# What an agent's screen shows while it waits on a choice rather than a prompt.
-_MENU = re.compile(r"Enter to confirm|Esc to cancel|Do you want to|\(y/n\)|❯ 1\.", re.IGNORECASE)
+# The footer an agent's menu or approval dialog ends with. A reply's own words
+# ("Do you want to...") must never count, so only these hints do.
+_MENU = re.compile(r"Esc to (?:cancel|exit|go back)|Enter to (?:confirm|select|set)", re.IGNORECASE)
 
 
 async def _tmux(*args: str) -> tuple[int, str]:
@@ -61,5 +62,6 @@ class AgentPane:
 def waiting_menu(screen: str) -> str | None:
     """The agent's menu, as its last lines, when its screen shows one."""
     lines = [line.rstrip() for line in screen.splitlines() if line.strip()]
-    tail = "\n".join(lines[-14:])
-    return tail if _MENU.search(tail) else None
+    if not any(_MENU.search(line) for line in lines[-3:]):
+        return None
+    return "\n".join(lines[-14:])

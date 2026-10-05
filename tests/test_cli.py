@@ -88,3 +88,12 @@ def test_a_menu_on_the_agent_screen_is_noticed_and_a_prompt_is_not():
     menu = "Do you want to make this edit?\n ❯ 1. Yes\n   2. No\nEsc to cancel"
     assert "1. Yes" in waiting_menu("old output\n" + menu)
     assert waiting_menu("❯ \n  auto mode on") is None
+
+
+def test_a_reply_that_asks_a_question_is_not_a_menu():
+    from briefpane.agentpane import waiting_menu
+
+    reply = "● Do you want to pick up the contract, or something else?\n✻ done\n❯ \n  auto mode on"
+    assert waiting_menu(reply) is None
+    model = "❯ 2. Opus\n   3. Sonnet\nEnter to set as default · s to use this session only · Esc to cancel"
+    assert waiting_menu(model) is not None

@@ -71,3 +71,17 @@ async def test_a_theme_change_redraws_without_doubling_turns(tmp_path):
         await pilot.press("ctrl+t")
         await pilot.pause(0.6)
         assert len(app.query(".turn")) == 1
+
+
+async def test_at_lists_matching_files_and_tab_inserts_one(tmp_path):
+    (tmp_path / "workflow.py").write_text("")
+    (tmp_path / "readme.md").write_text("")
+    app = BriefPane(ClaudeAdapter(), tmp_path, path=tmp_path / "none.jsonl", agent="%999")
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("r", "e", "v", "i", "e", "w", "space", "@", "w", "o")
+        await pilot.pause()
+        box = app.query_one("#suggest")
+        assert box.display and box.option_count == 1
+        await pilot.press("tab")
+        assert app.query_one("#prompt").value == "review @workflow.py "
+        assert not box.display

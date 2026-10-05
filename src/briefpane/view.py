@@ -80,7 +80,8 @@ def band(session: Session, pal: Palette, width: int = 200) -> Text:
             plain = _CODE.sub(r"\1", value)
             out.append(clip(plain, room), style=pal.strong if label == "you" else pal.text)
             out.append("   ")
-    return out if out.plain else Text("waiting for the first turn", style=pal.dim)
+    hint = "type in the agent below; each answer shows up here"
+    return out if out.plain else Text(hint, style=pal.dim)
 
 
 def turn(t: Turn, n: int, pal: Palette) -> Group:

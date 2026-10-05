@@ -1,0 +1,26 @@
+[project]
+name = "briefpane"
+version = "0.1.0"
+description = "A side pane that shows what your coding agent is doing: one structured answer per turn, the files it touched, and where you are."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["textual>=1.0"]
+keywords = ["claude-code", "codex", "tui", "terminal", "agents"]
+
+[project.scripts]
+briefpane = "briefpane.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

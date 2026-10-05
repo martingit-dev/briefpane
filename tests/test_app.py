@@ -51,3 +51,12 @@ async def test_t_cycles_matrix_dark_light(tmp_path):
         assert app.theme == "briefpane-dark"
         await pilot.press("t")
         assert app.theme == "briefpane-light"
+
+
+async def test_a_narrow_pane_hides_the_files_and_f_brings_them_back(tmp_path):
+    app = BriefPane(ClaudeAdapter(), tmp_path, path=tmp_path / "none.jsonl")
+    async with app.run_test(size=(84, 30)) as pilot:
+        await pilot.pause()
+        assert app.query_one("#files").has_class("hidden")
+        await pilot.press("f")
+        assert not app.query_one("#files").has_class("hidden")

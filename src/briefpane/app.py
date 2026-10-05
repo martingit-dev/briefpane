@@ -17,6 +17,8 @@ from .tail import Tail
 from .themes import ORDER, THEMES
 
 _POLL_S = 0.4
+# Below this width the files pane would squeeze the conversation; `f` still shows it.
+_FILES_MIN_WIDTH = 110
 
 
 class BriefPane(App):
@@ -104,6 +106,9 @@ class BriefPane(App):
         self.query_one("#files", Static).update(self.files_view)
         if at_end:
             convo.scroll_end(animate=False)
+
+    def on_resize(self, event) -> None:
+        self.query_one("#files").set_class(event.size.width < _FILES_MIN_WIDTH, "hidden")
 
     def action_cycle_theme(self) -> None:
         names = [THEMES[n].name for n in ORDER]

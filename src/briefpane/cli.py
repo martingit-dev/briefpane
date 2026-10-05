@@ -15,9 +15,8 @@ from pathlib import Path
 
 from . import __version__
 from .adapters import ADAPTERS, get
+from .config import LAYOUTS, Config, load
 from .themes import THEMES
-
-_WIDTH = "40%"
 
 
 def _view(argv: list[str]) -> None:
@@ -26,14 +25,40 @@ def _view(argv: list[str]) -> None:
     p.add_argument("--cwd", type=Path, default=Path.cwd())
     p.add_argument("--file", type=Path, help="a transcript to follow instead of the newest")
     p.add_argument("--since", type=float, default=0.0, help=argparse.SUPPRESS)
-    p.add_argument("--theme", choices=sorted(THEMES), default="matrix")
+    p.add_argument("--theme", choices=sorted(THEMES), default=load().theme)
     a = p.parse_args(argv)
     from .app import run
 
     run(get(a.agent), a.cwd.resolve(), a.since, a.file, a.theme)
 
 
-def _launch(agent: str, rest: list[str], theme: str) -> None:
+def tmux_plan(
+    layout: str,
+    in_tmux: bool,
+    agent_cmd: list[str],
+    viewer: list[str],
+    cwd: Path,
+    cfg: Config,
+) -> tuple[list[list[str]], list[str]]:
+    """The tmux commands to run first, then the argv to exec. The agent keeps
+    the pane you type in, so its input, slash commands and approvals are its own."""
+    if layout == "bottom":
+        # -b puts briefpane above the agent; the agent keeps agent_height rows.
+        split = ["split-window", "-v", "-b", "-d", "-l", _complement(cfg.agent_height)]
+    else:
+        split = ["split-window", "-h", "-d", "-l", cfg.pane_width]
+    split += ["-c", str(cwd), shlex.join(viewer)]
+    if in_tmux:
+        return [["tmux", *split]], agent_cmd
+    return [], ["tmux", "new-session", "-c", str(cwd), shlex.join(agent_cmd), ";", *split]
+
+
+def _complement(size: str) -> str:
+    """The share of the window briefpane takes once the agent has ``size``."""
+    return f"{100 - int(size.rstrip('%'))}%"
+
+
+def _launch(agent: str, rest: list[str], theme: str, layout: str, cfg: Config) -> None:
     adapter = get(agent)
     cwd = Path.cwd()
     since = time.time() - 1
@@ -42,32 +67,14 @@ def _launch(agent: str, rest: list[str], theme: str) -> None:
     agent_cmd = [adapter.command, *rest]
     if not shutil.which(adapter.command):
         raise SystemExit(f"briefpane: {adapter.command!r} is not on PATH")
-    if os.environ.get("TMUX"):
-        split = ["tmux", "split-window", "-h", "-d", "-l", _WIDTH, "-c", str(cwd)]
-        subprocess.run([*split, shlex.join(viewer)], check=True)
-        os.execvp(agent_cmd[0], agent_cmd)
-    if not shutil.which("tmux"):
+    in_tmux = bool(os.environ.get("TMUX"))
+    if not in_tmux and not shutil.which("tmux"):
         print(f"briefpane: no tmux; run `{shlex.join(viewer)}` in another terminal.")
         os.execvp(agent_cmd[0], agent_cmd)
-    os.execvp(
-        "tmux",
-        [
-            "tmux",
-            "new-session",
-            "-c",
-            str(cwd),
-            shlex.join(agent_cmd),
-            ";",
-            "split-window",
-            "-h",
-            "-d",
-            "-l",
-            _WIDTH,
-            "-c",
-            str(cwd),
-            shlex.join(viewer),
-        ],
-    )
+    before, final = tmux_plan(layout, in_tmux, agent_cmd, viewer, cwd, cfg)
+    for cmd in before:
+        subprocess.run(cmd, check=True)
+    os.execvp(final[0], final)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -81,8 +88,10 @@ def main(argv: list[str] | None = None) -> None:
         epilog="briefpane view <agent> opens only the pane.",
     )
     p.add_argument("--version", action="version", version=f"briefpane {__version__}")
-    p.add_argument("--theme", choices=sorted(THEMES), default="matrix")
+    cfg = load()
+    p.add_argument("--theme", choices=sorted(THEMES), default=cfg.theme)
+    p.add_argument("--layout", choices=LAYOUTS, default=cfg.layout)
     p.add_argument("agent", choices=sorted(ADAPTERS))
     p.add_argument("args", nargs=argparse.REMAINDER, help="passed to the agent")
     a = p.parse_args(argv)
-    _launch(a.agent, a.args, a.theme)
+    _launch(a.agent, a.args, a.theme, a.layout, cfg)

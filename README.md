@@ -25,12 +25,31 @@ briefpane view claude       # just the pane, on the newest session in this direc
 briefpane view codex --file ~/.codex/sessions/2026/10/05/rollout-....jsonl
 ```
 
-Inside tmux the pane splits off the current window; outside it, briefpane
-opens a new tmux session with both.
+You keep typing in the agent itself, so `@` file references, slash commands,
+approvals and menus all work as usual; briefpane only changes what you read.
+
+Layouts:
+
+- `bottom` (default): briefpane fills the window, the agent is a strip below where you type.
+- `side`: the agent on the left, briefpane on the right.
+
+Inside tmux briefpane splits the current window; outside it, it opens a new
+tmux session with both.
 
 Keys: `t` theme, `f` files pane, `End` latest turn, `q` quit.
 
 Themes: `matrix` (default), `dark`, `light`. Pick one with `--theme`, or cycle with `t`.
+
+## Config
+
+`~/.config/briefpane/config.toml` sets your defaults; flags still override them.
+
+```toml
+theme = "matrix"        # matrix | dark | light
+layout = "bottom"       # bottom | side
+agent_height = "30%"    # the agent's strip in the bottom layout
+pane_width = "40%"      # briefpane's width in the side layout
+```
 
 ## Structured replies
 

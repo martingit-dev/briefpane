@@ -125,8 +125,8 @@ struct Repo {
 }
 
 impl Repo {
-    /// Stamps of what a commit rewrites: HEAD, the index, the branch ref and
-    /// packed refs. A partial commit leaves the status and the work tree as
+    /// Stamps of what a commit rewrites: HEAD, the index, the branch ref,
+    /// packed refs and a reftable's table list. A partial commit leaves the status and the work tree as
     /// they were but moves HEAD, so the old side of every diff changes.
     fn head(&self) -> Vec<Stamp> {
         let head = std::fs::read_to_string(self.git_dir.join("HEAD")).unwrap_or_default();
@@ -138,6 +138,7 @@ impl Repo {
             Some(self.git_dir.join("index")),
             branch,
             Some(self.common_dir.join("packed-refs")),
+            Some(self.common_dir.join("reftable/tables.list")),
         ]
         .into_iter()
         .map(|p| p.and_then(|p| stamp(&p)))

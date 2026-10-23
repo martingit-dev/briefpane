@@ -84,11 +84,13 @@ impl Streams {
     }
 }
 
-fn session_id_of(clients: &Mutex<HashMap<String, Client>>, session: &str) -> String {
-    lock(clients)
-        .get(session)
-        .map(|c| c.session_id.clone())
-        .unwrap_or_default()
+/// The id of the session named exactly `name`, from `list-sessions -F
+/// '#{session_id}\t#{session_name}'`.
+fn id_of(list: &str, name: &str) -> Option<String> {
+    list.lines()
+        .filter_map(|l| l.split_once('\t'))
+        .find(|(_, n)| *n == name)
+        .map(|(id, _)| id.to_string())
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -384,20 +386,11 @@ impl Tmux {
         if lock(&self.clients).contains_key(session) {
             return Ok(());
         }
-        // `=` matches the name exactly. A gone session can still print an
-        // empty id, and `attach -t ""` would join some other session.
-        let session_id = tmux(&[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("={session}:"),
-            "#{session_id}",
-        ])?
-        .trim()
-        .to_string();
-        if !session_id.starts_with('$') {
-            return Err(format!("no session {session:?}"));
-        }
+        // Matched by name against the session list: tmux target lookup reads
+        // `$N` as an id and prints an empty id for a missing session, and
+        // `attach -t ""` would join some other session.
+        let list = tmux(&["list-sessions", "-F", "#{session_id}\t#{session_name}"])?;
+        let session_id = id_of(&list, session).ok_or_else(|| format!("no session {session:?}"))?;
         let mut child = proc::spawn(
             Command::new("tmux")
                 .args(["-C", "attach-session", "-t", &session_id])
@@ -426,7 +419,7 @@ impl Tmux {
                 session.to_string(),
                 Client {
                     serial,
-                    session_id,
+                    session_id: session_id.clone(),
                     tx: tx.clone(),
                     streams: Arc::clone(&streams),
                 },
@@ -435,7 +428,7 @@ impl Tmux {
 
         log::event(
             "client",
-            json!({ "session": session, "id": session_id_of(&self.clients, session), "serial": serial }),
+            json!({ "session": session, "id": session_id, "serial": serial }),
         );
         let who = session.to_string();
         std::thread::spawn(move || {
@@ -670,6 +663,15 @@ fn flush(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_ids_by_exact_name() {
+        let list = "$1\t$0\n$0\tkeep\n$2\tkeeper\n";
+        assert_eq!(id_of(list, "$0").as_deref(), Some("$1"));
+        assert_eq!(id_of(list, "keep").as_deref(), Some("$0"));
+        assert_eq!(id_of(list, "kee"), None);
+        assert_eq!(id_of(list, ""), None);
+    }
 
     #[test]
     fn pane_ids_only() {

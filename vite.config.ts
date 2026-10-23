@@ -6,11 +6,11 @@ import { defineConfig } from "vite";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(() => ({
+export default defineConfig(({ mode }) => ({
   plugins: [react()],
   // Hooks the e2e reads (the terminal buffer, frame counts): in the dev server
   // and debug builds, never in a release build.
-  define: { __BP_TEST_HOOKS__: JSON.stringify(process.env.TAURI_ENV_DEBUG !== "false") },
+  define: { __BP_TEST_HOOKS__: JSON.stringify(mode === "development" || process.env.TAURI_ENV_DEBUG === "true") },
   // The diff highlighter's worker imports modules, which a classic worker cannot.
   worker: { format: "es" as const },
   // Pre-bundled at startup: discovered on first open of the lazy Changes tab,

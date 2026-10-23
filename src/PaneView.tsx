@@ -179,6 +179,9 @@ export function PaneView({ pane }: { pane: Pane }) {
       input.dispose();
       term.textarea?.removeEventListener("focus", claim);
       termRef.current = null;
+      // The host outlives a reopen; its markers describe the view being torn down.
+      delete el.dataset.ready;
+      delete el.dataset.error;
       term.dispose();
     };
   }, [session, pane_id, epoch]);

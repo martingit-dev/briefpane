@@ -58,7 +58,7 @@ function report() {
   const cmds = [...win.cmds.entries()]
     .sort((a, b) => b[1].max - a[1].max)
     .slice(0, 4)
-    .map(([n, c]) => `${n} ${c.n}x max ${c.max.toFixed(0)}ms`)
+    .map(([n, c]) => `${n} ${c.n}x slow, max ${c.max.toFixed(0)}ms`)
     .join(", ");
   const flags = [];
   if (perMin > MAX_SPAWNS_MIN) flags.push(`spawns ${perMin}/min > ${MAX_SPAWNS_MIN}`);

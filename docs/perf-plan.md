@@ -24,12 +24,13 @@ keep their current signature.
 
 One JSON line per event in `$BRIEFPANE_LOG`, default `/tmp/briefpane/briefpane.jsonl`:
 
-    {"t":"2026-10-23T20:40:01.123","src":"rust","kind":"cmd","name":"changes","ms":12.4,"ok":true}
+    {"t":"2026-10-23T20:40:01.123","src":"rust","kind":"cmd","name":"changes","ms":42.4,"ok":true}
     {"t":"...","src":"rust","kind":"stream","pane":"%12","bytes_s":5400,"frames_s":30}
     {"t":"...","src":"web","kind":"error","msg":"...","data":{...}}
     {"t":"...","src":"web","kind":"perf","name":"pane-open","ms":180}
 
-Kinds: `start`, `cmd` (every command: name, ms, ok, err), `spawn` (every
+Kinds: `start`, `cmd` (a failed command, or one of 20 ms or more: name, ms,
+ok, err), `client` and `client-end` (a control client starts or ends), `spawn` (every
 child process: program, ms), `stream` (per watched pane, once a second while
 busy), `error`, `perf`.
 

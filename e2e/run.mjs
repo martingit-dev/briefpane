@@ -365,6 +365,30 @@ try {
   tmux("kill-session", "-t", AGAIN);
   console.log("app: a recreated session streams again");
 
+  // Detaching the app's client (as `tmux attach -d` does) reopens the open view.
+  const live = tmux(
+    "new-window",
+    "-d",
+    "-P",
+    "-F",
+    "#{pane_id}",
+    "-t",
+    `${SESSION}:`,
+    "bash --norc --noprofile",
+  ).trim();
+  await (await browser.$(`button.task[data-pane="${live}"]`)).click();
+  await ready(live);
+  tmux("detach-client", "-s", SESSION);
+  await waitFor("the view to reopen after the detach", async () =>
+    browser.execute((p) => {
+      const v = document.querySelector(".paneview");
+      return v?.dataset.ready === p && !v.dataset.error;
+    }, live),
+  );
+  await (await browser.$(".xterm-helper-textarea")).addValue(`echo ${TOKEN}-d\uE007`);
+  await waitFor("output after the reopen", async () => (await termText()).split(`${TOKEN}-d`).length > 2);
+  console.log("app: a detached view reopens and streams");
+
   // A clicked link opens in the browser and the window stays on the app.
   const home = await browser.execute(() => location.href);
   await browser.execute(() => {

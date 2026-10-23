@@ -55,6 +55,8 @@ try {
     (await browser.execute(() => document.querySelector(".xterm-rows")?.textContent ?? "")).includes(`${token}`),
   );
   console.log("release: pane output streams into the view");
+  if (await browser.execute(() => "__bpTerm" in window)) throw new Error("the release build exposes test hooks");
+  console.log("release: no test hooks");
 
   await (await browser.$("button=Changes")).click();
   await waitFor("the diff of hello.txt", async () =>

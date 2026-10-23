@@ -1,8 +1,7 @@
-import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { attach, capture, type Output, type Pane, resize, sendKeys } from "./tmux";
+import { attach, capture, log, type Pane, paneSize, resize, type Snapshot, sendKeys, unwatch, watch } from "./tmux";
 
 const BASE_FONT = 13;
 const MIN_FONT = 9;
@@ -39,7 +38,7 @@ export function PaneView({ pane }: { pane: Pane }) {
     term.loadAddon(fit);
     term.open(el);
     // The e2e test reads the buffer: WebKit stops painting a window that is off screen.
-    (window as unknown as { __bpTerm: Terminal }).__bpTerm = term;
+    if (import.meta.env.DEV) (window as unknown as { __bpTerm: Terminal }).__bpTerm = term;
 
     // What the view holds at the base font: the window size we ask tmux for.
     const wanted = () => {
@@ -63,50 +62,68 @@ export function PaneView({ pane }: { pane: Pane }) {
     fitFont();
 
     let live = true;
-    let unlisten: (() => void) | undefined;
+    let watchId: number | undefined;
     const buffered: Uint8Array[] = [];
     let primed = false;
+    const opened = performance.now();
 
-    // Subscribe before the snapshot so no output falls between the two.
-    listen<Output>("pane-output", (e) => {
-      if (e.payload.pane !== pane_id) return;
-      const bytes = new Uint8Array(e.payload.data);
-      if (primed) term.write(bytes);
-      else buffered.push(bytes);
-    })
-      .then(async (u) => {
-        if (!live) return u();
-        unlisten = u;
+    const open = async () => {
+      try {
         await attach(session);
+        // Watch before the snapshot so no output falls between the two.
+        const id = await watch(session, pane_id, (bytes) => {
+          if (!live) return;
+          if (primed) term.write(bytes);
+          else buffered.push(bytes);
+        });
+        if (!live) return void unwatch(id).catch(() => {});
+        watchId = id;
         const w = wanted();
         if (w) await resize(session, w.cols, w.rows);
         // Wait for the pane's size to stop changing. In a split it never
         // equals what we asked for, so "stable" is the signal, not "equal".
-        let s = await capture(pane_id);
-        for (let i = 0; i < SETTLE_TRIES; i++) {
+        let size = await paneSize(pane_id);
+        for (let i = 0; i < SETTLE_TRIES && live; i++) {
           await new Promise((r) => setTimeout(r, SETTLE_MS));
-          buffered.length = 0; // the next snapshot already contains it
-          const next = await capture(pane_id);
-          const stable = next.width === s.width && next.height === s.height;
-          s = next;
+          const next = await paneSize(pane_id);
+          const stable = next.width === size.width && next.height === size.height;
+          size = next;
           if (stable) break;
         }
-        if (!live) return;
-        term.resize(s.width, s.height);
-        fitFont();
-        const lines = (t: string) => t.replace(/\n$/, "").split("\n");
-        if (s.history.trim()) term.write(`${lines(s.history).join("\r\n")}\r\n`);
-        // Scroll history out of view, then paint each screen row in place.
-        term.write("\r\n".repeat(term.rows));
-        for (const [row, line] of lines(s.text).entries()) term.write(`\x1b[${row + 1};1H${line}\x1b[0m`);
-        term.write(`\x1b[${s.cursor_y + 1};${s.cursor_x + 1}H`);
-        for (const b of buffered) term.write(b);
-        primed = true;
-      })
-      .catch((err) => {
-        // Surfaced on the element so a failed attach is visible, not a blank pane.
-        el.dataset.error = String(err);
-      });
+      } catch (err) {
+        fail("attach", err);
+        return;
+      }
+      if (!live) return;
+      let s: Snapshot;
+      try {
+        buffered.length = 0; // the snapshot already contains it
+        s = await capture(pane_id);
+      } catch (err) {
+        fail("capture", err);
+        return;
+      }
+      if (!live) return;
+      term.resize(s.width, s.height);
+      fitFont();
+      const lines = (t: string) => t.replace(/\n$/, "").split("\n");
+      if (s.history.trim()) term.write(`${lines(s.history).join("\r\n")}\r\n`);
+      // Scroll history out of view, then paint each screen row in place.
+      term.write("\r\n".repeat(term.rows));
+      for (const [row, line] of lines(s.text).entries()) term.write(`\x1b[${row + 1};1H${line}\x1b[0m`);
+      term.write(`\x1b[${s.cursor_y + 1};${s.cursor_x + 1}H`);
+      for (const b of buffered) term.write(b);
+      buffered.length = 0;
+      primed = true;
+      log("perf", "pane-open", { ms: Math.round(performance.now() - opened), pane: pane_id });
+    };
+    const fail = (stage: string, err: unknown) => {
+      if (!live) return;
+      // Surfaced on the element so a failed attach is visible, not a blank pane.
+      el.dataset.error = String(err);
+      log("error", `pane ${stage} failed`, { session, pane: pane_id, error: String(err) });
+    };
+    void open();
 
     // When the view changes size, ask tmux for a matching window; the pane's
     // new size comes back through the pane list and the effect below.
@@ -141,7 +158,7 @@ export function PaneView({ pane }: { pane: Pane }) {
     return () => {
       live = false;
       clearTimeout(pending);
-      unlisten?.();
+      if (watchId !== undefined) void unwatch(watchId).catch(() => {});
       observer.disconnect();
       input.dispose();
       term.textarea?.removeEventListener("focus", claim);

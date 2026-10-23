@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export type Pane = {
   session: string;
@@ -31,10 +31,11 @@ export type Snapshot = {
   height: number;
 };
 
-export type Output = { pane: string; data: number[] };
+export type PaneSize = { width: number; height: number };
 
 export const listPanes = () => invoke<Pane[]>("list_panes");
 export const capture = (pane: string) => invoke<Snapshot>("capture", { pane });
+export const paneSize = (pane: string) => invoke<PaneSize>("pane_size", { pane });
 export const attach = (session: string) => invoke<void>("attach", { session });
 export const resize = (session: string, cols: number, rows: number) => invoke<void>("resize", { session, cols, rows });
 export const newTerminal = (session: string | null, path: string) => invoke<string>("new_terminal", { session, path });
@@ -71,4 +72,36 @@ export const sendKeys = (session: string, pane: string, data: string) =>
 export function taskOf(p: Pane): string {
   const t = p.title.replace(/^[^\p{L}\p{N}]+/u, "").replace(/\s+\|\s+\S+$/, "");
   return t || p.window_name;
+}
+
+const channels = new Map<number, Channel<unknown>>();
+
+/** Streams one pane's output as raw bytes until `unwatch` is called with the returned id. */
+export async function watch(session: string, pane: string, onBytes: (bytes: Uint8Array) => void): Promise<number> {
+  const output = new Channel<unknown>();
+  output.onmessage = (frame) => {
+    // Raw frames arrive as an ArrayBuffer; a JSON-encoded body would be a number array.
+    if (frame instanceof ArrayBuffer) onBytes(new Uint8Array(frame));
+    else if (ArrayBuffer.isView(frame)) onBytes(new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength));
+    else if (Array.isArray(frame)) onBytes(Uint8Array.from(frame as number[]));
+  };
+  const id = await invoke<number>("watch", { session, pane, output });
+  channels.set(id, output);
+  return id;
+}
+
+export async function unwatch(id: number): Promise<void> {
+  const output = channels.get(id);
+  channels.delete(id);
+  // Frames already in flight when the stream stops are dropped.
+  if (output) output.onmessage = () => {};
+  await invoke<void>("unwatch", { id });
+}
+
+export type LogLevel = "error" | "perf";
+
+/** Writes to the app log. Never rejects: a failed log must not raise another error. */
+export function log(level: LogLevel, msg: string, data?: unknown): void {
+  if (import.meta.env.DEV) (level === "error" ? console.error : console.debug)(`[${level}] ${msg}`, data ?? "");
+  invoke<void>("log", { level, msg, data: data ?? null }).catch(() => {});
 }

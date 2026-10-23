@@ -1,9 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { PaneView } from "./PaneView";
 import { RightPanel } from "./RightPanel";
 import { listPanes, newTerminal, type Pane, PHASES, statusOf, taskOf } from "./tmux";
 import { useCard } from "./useCard";
+import { usePoll } from "./usePoll";
 
 const repoOf = (p: Pane) => p.path.split("/").filter(Boolean).pop() ?? p.path;
 
@@ -17,27 +18,70 @@ const GROUPS = [
   ["terminal", "Terminals"],
 ] as const;
 
+const PaneRow = memo(function PaneRow({
+  pane: p,
+  on,
+  onSelect,
+}: {
+  pane: Pane;
+  on: boolean;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-pane={p.pane_id}
+      className={`task ${on ? "on" : ""}`}
+      onClick={() => onSelect(p.pane_id)}
+    >
+      <span className={`dot ${statusOf(p)}`} />
+      <span className="body">
+        <span className="t">{p.agent ? taskOf(p) : p.window_name}</span>
+        <span className="s">
+          {p.state?.state === "needs-you" && p.state.message
+            ? p.state.message
+            : `${p.agent ?? p.command} · ${p.agent ? repoOf(p) : p.session}`}
+        </span>
+      </span>
+    </button>
+  );
+});
+
+/** The pane list, reusing the previous object for every pane whose fields are unchanged. */
+function usePanes() {
+  const known = useRef(new Map<string, { json: string; pane: Pane }>());
+  return usePoll(
+    "panes",
+    async () => {
+      const next = new Map<string, { json: string; pane: Pane }>();
+      const list = (await listPanes()).map((p) => {
+        const json = JSON.stringify(p);
+        const prev = known.current.get(p.pane_id);
+        const pane = prev && prev.json === json ? prev.pane : p;
+        next.set(p.pane_id, { json, pane });
+        return pane;
+      });
+      known.current = next;
+      return list;
+    },
+    3000,
+    [],
+  );
+}
+
+const NO_PANES: Pane[] = [];
+
 export default function App() {
-  const [panes, setPanes] = useState<Pane[]>([]);
+  const { value: polled, error: pollError, reload: refresh } = usePanes();
+  const panes = polled ?? NO_PANES;
   const [selected, setSelected] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(() => {
-    listPanes()
-      .then((p) => {
-        setPanes(p);
-        setError(null);
-      })
-      .catch((e) => setError(String(e)));
-  }, []);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const error = actionError ?? pollError;
 
   useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 3000);
     const un = listen("panes-changed", refresh);
     return () => {
-      clearInterval(t);
       un.then((u) => u());
     };
   }, [refresh]);
@@ -48,10 +92,11 @@ export default function App() {
   const openTerminal = () =>
     newTerminal(pane?.session ?? null, pane?.path ?? "~")
       .then((id) => {
+        setActionError(null);
         refresh();
         setSelected(id);
       })
-      .catch((e) => setError(String(e)));
+      .catch((e) => setActionError(String(e)));
 
   const groups = useMemo(
     () =>
@@ -122,23 +167,7 @@ export default function App() {
                 {g.label} {g.items.length}
               </div>
               {g.items.map((p) => (
-                <button
-                  type="button"
-                  key={p.pane_id}
-                  data-pane={p.pane_id}
-                  className={`task ${p.pane_id === selected ? "on" : ""}`}
-                  onClick={() => setSelected(p.pane_id)}
-                >
-                  <span className={`dot ${statusOf(p)}`} />
-                  <span className="body">
-                    <span className="t">{p.agent ? taskOf(p) : p.window_name}</span>
-                    <span className="s">
-                      {p.state?.state === "needs-you" && p.state.message
-                        ? p.state.message
-                        : `${p.agent ?? p.command} · ${p.agent ? repoOf(p) : p.session}`}
-                    </span>
-                  </span>
-                </button>
+                <PaneRow key={p.pane_id} pane={p} on={p.pane_id === selected} onSelect={setSelected} />
               ))}
             </section>
           ))}

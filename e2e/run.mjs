@@ -453,6 +453,10 @@ try {
 } finally {
   await Promise.race([browser?.deleteSession().catch(() => {}), sleep(5_000)]);
   driver.kill();
+  // tauri-driver can exit before the app it started; never leave one behind.
+  try {
+    execFileSync("pkill", ["-f", `^${APP}$`]);
+  } catch {}
   if (stateFile) rmSync(stateFile, { force: true });
   rmSync(REPO, { recursive: true, force: true });
   rmSync(`${REPO}-cards`, { recursive: true, force: true });

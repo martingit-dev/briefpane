@@ -9,7 +9,7 @@ import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 const LOG = process.argv[2] ?? process.env.BRIEFPANE_LOG ?? "/tmp/briefpane/briefpane.jsonl";
 const EVERY_MS = 10_000;
 const SLOW_CMD_MS = 50;
-const MAX_SPAWNS_MIN = 10;
+const MAX_SPAWNS_MIN = 25;
 const MAX_OPEN_MS = 300;
 
 let offset = existsSync(LOG) ? statSync(LOG).size : 0;

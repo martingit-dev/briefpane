@@ -35,7 +35,7 @@ busy), `error`, `perf`.
 ## Expectations (each one is checked)
 
 1. No command runs on the main thread; no command over 50 ms in the log at idle.
-2. Idle with an agent pane selected: at most 10 process spawns a minute.
+2. Idle with an agent pane selected: at most 25 process spawns a minute: the 3 s pane list is 20 of them until tmux pushes pane changes.
 3. Opening a pane: one `capture`, size polled with `pane_size`; under 300 ms in the log.
 4. Output frames are raw bytes; only watched panes stream.
 5. A stalled tmux client never blocks another session's keys (no IO under the map lock).

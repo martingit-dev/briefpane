@@ -10,6 +10,9 @@ export default defineConfig(() => ({
   plugins: [react()],
   // The diff highlighter's worker imports modules, which a classic worker cannot.
   worker: { format: "es" as const },
+  // Pre-bundled at startup: discovered on first open of the lazy Changes tab,
+  // the dev server re-optimises and reloads, failing that import.
+  optimizeDeps: { include: ["@pierre/diffs/react", "@pierre/diffs/worker"] },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

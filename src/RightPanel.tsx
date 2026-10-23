@@ -2,16 +2,23 @@ import { MultiFileDiff } from "@pierre/diffs/react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useEffect, useMemo, useState } from "react";
-import { approvePlan, brief, type Card, changes, type FileChange, type Pane } from "./tmux";
+import { approvePlan, brief, type Card, changes, dispose, type FileChange, type Pane, sendKeys, startReview } from "./tmux";
 
 const REFRESH_MS = 3000;
+/** What the building agent is told: the findings the human marked fix. */
+const fixMessage = (fixes: Card["review"]) =>
+  `Fix these review findings, then re-run the proof and update the card: ${fixes
+    .map((r) => `${r.id} (${r.severity}) ${r.summary}`)
+    .join("; ")}`;
+
 const STATE_LABEL = { "needs-you": "Needs you", working: "Working", done: "Ready" } as const;
 const DIFF_OPTIONS = { theme: { dark: "min-dark", light: "min-light" }, themeType: "dark", diffStyle: "unified", overflow: "wrap" } as const;
 
 /** The agent's last answer, rendered, and the repo's uncommitted changes. */
 export function RightPanel({ pane, card, reloadCard }: { pane: Pane; card: Card | null; reloadCard: () => void }) {
   const [tab, setTab] = useState<"brief" | "card" | "changes">("brief");
-  const [approveError, setApproveError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const fixes = card?.review.filter((r) => r.state === "fix") ?? [];
   const [answer, setAnswer] = useState<string | null>(null);
   const [files, setFiles] = useState<FileChange[]>([]);
 
@@ -87,17 +94,17 @@ export function RightPanel({ pane, card, reloadCard }: { pane: Pane; card: Card 
                       onClick={() =>
                         approvePlan(pane.path)
                           .then(() => {
-                            setApproveError(null);
+                            setActionError(null);
                             reloadCard();
                           })
-                          .catch((e) => setApproveError(String(e)))
+                          .catch((e) => setActionError(String(e)))
                       }
                     >
                       Approve plan
                     </button>
                   </div>
                 )}
-                {approveError && <p className="err">{approveError}</p>}
+                {actionError && <p className="err">{actionError}</p>}
               </section>
               <section>
                 <div className="cap">
@@ -116,6 +123,62 @@ export function RightPanel({ pane, card, reloadCard }: { pane: Pane; card: Card 
                 ) : (
                   <p className="faint">None named.</p>
                 )}
+              </section>
+              <section>
+                <div className="cap">
+                  Review{" "}
+                  {card.review.length > 0 && (
+                    <span className="faint">{card.review.filter((r) => r.state === "open").length} open</span>
+                  )}
+                </div>
+                {card.review.map((r) => (
+                  <div className={`finding ${r.state}`} key={r.id}>
+                    <span className="mono faint">
+                      {r.id} {r.severity}
+                    </span>
+                    <span className="sum">{r.summary}</span>
+                    <span className="verdicts">
+                      {(["fix", "defer", "reject"] as const).map((v) => (
+                        <button
+                          type="button"
+                          key={v}
+                          className={`btn ${r.state === v ? "pri" : ""}`}
+                          onClick={() => dispose(pane.path, r.id, v).then(reloadCard).catch((e) => setActionError(String(e)))}
+                        >
+                          {v}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                ))}
+                <div className="reviewbar">
+                  {card.meta.plan_approved && pane.agent && (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        startReview(pane.session, pane.path, pane.agent ?? "", pane.pane_id)
+                          .then(reloadCard)
+                          .catch((e) => setActionError(String(e)))
+                      }
+                    >
+                      Start review
+                    </button>
+                  )}
+                  {fixes.length > 0 && card.meta.builder && (
+                    <button
+                      type="button"
+                      className="btn pri"
+                      onClick={() =>
+                        sendKeys(pane.session, card.meta.builder ?? "", `${fixMessage(fixes)}\r`).catch((e) =>
+                          setActionError(String(e)),
+                        )
+                      }
+                    >
+                      Send {fixes.length} {fixes.length === 1 ? "fix" : "fixes"} to the agent
+                    </button>
+                  )}
+                </div>
               </section>
               {card.next && (
                 <section>

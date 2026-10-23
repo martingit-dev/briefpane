@@ -16,6 +16,8 @@ pub fn run() {
             brief::changes,
             brief::card,
             brief::approve_plan,
+            brief::start_review,
+            brief::dispose,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

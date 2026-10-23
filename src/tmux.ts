@@ -45,16 +45,20 @@ export const changes = (path: string) => invoke<FileChange[]>("changes", { path 
 export type Proof = { done: boolean; claim: string; evidence: string };
 export type Card = {
   path: string;
-  meta: { repo: string; branch: string; phase: string; plan_approved: string; updated?: string };
+  meta: { repo: string; branch: string; phase: string; plan_approved: string; updated?: string; builder?: string };
   define: string;
   plan: string;
   proof: Proof[];
-  review: string;
+  review: Finding[];
   next: string;
 };
+export type Finding = { id: string; state: "open" | "fix" | "defer" | "reject"; severity: string; summary: string; note: string };
 export const PHASES = ["define", "plan", "build", "verify", "review", "ship"] as const;
 export const card = (path: string) => invoke<Card | null>("card", { path });
 export const approvePlan = (path: string) => invoke<void>("approve_plan", { path });
+export const startReview = (session: string, path: string, agent: string, builder: string) =>
+  invoke<string>("start_review", { session, path, agent, builder });
+export const dispose = (path: string, id: string, verdict: string) => invoke<void>("dispose", { path, id, verdict });
 export const sendKeys = (session: string, pane: string, data: string) =>
   invoke<void>("send_keys", { session, pane, data });
 

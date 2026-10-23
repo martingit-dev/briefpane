@@ -128,3 +128,35 @@ pub fn card(path: String) -> Result<Value, String> {
 pub fn approve_plan(path: String) -> Result<(), String> {
     card_cli(&path, &["approve"]).map(|_| ())
 }
+
+const REVIEW_PROMPT: &str = "Review this change with fresh eyes. Read the task card with `briefpane-card show`, then the change with `git status`, `git diff` and `git diff --staged`. Judge three things: does it do what Define says, is every Proof real evidence, and are there bugs, missed cases or needless code. Do not edit any file. Record each finding with `briefpane-card finding <P0|P1|P2> \"<what is wrong, and where>\"`: P0 breaks the Define, P1 is a real bug or gap, P2 is a cleanup. When done, run `briefpane-card next \"review done\"` and stop.";
+
+/// Opens a fresh session of the same agent in a new window of `session`,
+/// reviewing the repo at `path` against its card. Claude runs with edits
+/// disallowed; Codex is told not to edit. Returns the new pane id.
+#[tauri::command]
+pub fn start_review(session: String, path: String, agent: String, builder: String) -> Result<String, String> {
+    let mut cmd: Vec<&str> = vec!["tmux", "new-window", "-d", "-P", "-F", "#{pane_id}", "-n", "review", "-c", &path];
+    let target = format!("{session}:");
+    cmd.extend(["-t", &target]);
+    // BRIEFPANE_CLAUDE / BRIEFPANE_CODEX point at a different binary.
+    let bin = std::env::var(format!("BRIEFPANE_{}", agent.to_uppercase())).unwrap_or_else(|_| agent.clone());
+    match agent.as_str() {
+        "claude" => cmd.extend([bin.as_str(), "--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit", REVIEW_PROMPT]),
+        "codex" => cmd.extend([bin.as_str(), REVIEW_PROMPT]),
+        other => return Err(format!("no reviewer for {other}")),
+    }
+    let out = Command::new(cmd[0]).args(&cmd[1..]).output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    card_cli(&path, &["phase", "review"])?;
+    card_cli(&path, &["builder", &builder])?;
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// The human's verdict on one review finding.
+#[tauri::command]
+pub fn dispose(path: String, id: String, verdict: String) -> Result<(), String> {
+    card_cli(&path, &["dispose", &id, &verdict]).map(|_| ())
+}

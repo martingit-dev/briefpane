@@ -388,3 +388,28 @@ button {
 .proof .dot {
   margin: 6px 0 0;
 }
+
+.finding {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.finding.reject .sum,
+.finding.defer .sum {
+  color: var(--faint);
+}
+.verdicts {
+  display: flex;
+  gap: 4px;
+}
+.verdicts .btn {
+  padding: 1px 8px;
+}
+.reviewbar {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}

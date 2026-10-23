@@ -5,7 +5,7 @@
 // Needs: tauri-driver on PATH, WebKitWebDriver, and a binary from
 // `pnpm tauri build --debug --no-bundle`.
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
 import { remote } from "webdriverio";
@@ -57,6 +57,8 @@ cardCli(["proof", "Changes lists hello.txt"]);
 
 tmux("new-session", "-d", "-s", SESSION, "-n", "e2e", "-c", REPO, "-x", "100", "-y", "30", "bash --norc --noprofile");
 
+const stub = mkdtempSync(`${tmpdir()}/bp-stub-`);
+process.env.BRIEFPANE_CLAUDE = `${stub}/claude`;
 const driver = spawn("tauri-driver", [], { stdio: "ignore" });
 let browser;
 let stateFile;
@@ -117,7 +119,7 @@ try {
   console.log(`tmux: pane resized to ${tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim()}`);
 
   // A pane running `claude` that its hook marked as waiting moves to Needs you.
-  tmux("new-window", "-d", "-t", SESSION, "-n", "agent", "exec -a claude sleep 600");
+  tmux("new-window", "-d", "-t", SESSION, "-n", "agent", "-c", REPO, "exec -a claude sleep 600");
   const agentPane = tmux("display-message", "-p", "-t", `${SESSION}:agent`, "#{pane_id}").trim();
   const ask = `Claude needs your permission ${process.pid}`;
   execFileSync("briefpane-hook", ["claude", "needs-you"], {
@@ -218,6 +220,56 @@ try {
   );
   console.log("app: new terminal opened in the selected pane's repo");
 
+  // Review: a fresh agent starts read-only, findings get verdicts, fixes go
+  // back to the building agent. A stub `claude` (BRIEFPANE_CLAUDE, set before
+  // the app starts) records how it was launched instead of starting a real one.
+  writeFileSync(`${stub}/claude`, `#!/bin/sh\nprintf '%s\\n' "$@" > ${stub}/args\nexec sleep 600\n`, { mode: 0o755 });
+
+  await browser.execute((p) => {
+    for (const b of document.querySelectorAll("button.task")) if (b.dataset.pane === p) b.click();
+  }, agentPane);
+  await (await browser.$("button=Card")).click();
+  const startReview = await browser.$("button=Start review");
+  await startReview.waitForExist({ timeout: 10_000 });
+  await startReview.click();
+  await waitFor("the reviewer to start read-only", () => {
+    try {
+      const args = readFileSync(`${stub}/args`, "utf8");
+      return args.includes("--disallowedTools") && args.includes("Edit,Write") && args.includes("briefpane-card finding");
+    } catch {
+      return false;
+    }
+  });
+  const afterStart = JSON.parse(cardCli(["json"]));
+  if (afterStart.meta.phase !== "review" || afterStart.meta.builder !== agentPane) throw new Error("review should set phase and builder");
+  console.log("app: review started as a fresh read-only claude");
+
+  cardCli(["finding", "P1", "Nightly backup lacks the wait"]);
+  cardCli(["finding", "P2", "Cap is not configurable"]);
+  const verdict = (id, v) =>
+    browser.execute(
+      (id, v) => {
+        for (const f of document.querySelectorAll(".finding"))
+          if (f.textContent.includes(id)) for (const b of f.querySelectorAll("button")) if (b.textContent === v) b.click();
+      },
+      id,
+      v,
+    );
+  await waitFor("the findings in the Card tab", async () => (await browser.$$(".finding")).length === 2);
+  await verdict("R1", "fix");
+  await verdict("R2", "reject");
+  await waitFor("the verdicts on the card", () => {
+    const r = JSON.parse(cardCli(["json"])).review;
+    return r[0].state === "fix" && r[1].state === "reject";
+  });
+  const send = await browser.$("button=Send 1 fix to the agent");
+  await send.waitForExist({ timeout: 10_000 });
+  await send.click();
+  await waitFor("the fix to reach the building agent", () =>
+    tmux("capture-pane", "-p", "-J", "-t", agentPane).includes("R1 (P1) Nightly backup lacks the wait"),
+  );
+  console.log("app: verdicts saved and the fix sent to the building agent");
+
   // Best effort: WebKit waits for a paint that never comes off screen.
   const shot = await Promise.race([
     browser.saveScreenshot(`${OUT}app.png`).then(() => `screenshot: ${OUT}app.png`),
@@ -233,6 +285,7 @@ try {
   if (stateFile) rmSync(stateFile, { force: true });
   rmSync(REPO, { recursive: true, force: true });
   rmSync(`${REPO}-cards`, { recursive: true, force: true });
+  rmSync(stub, { recursive: true, force: true });
   try {
     tmux("kill-session", "-t", SESSION);
   } catch {}

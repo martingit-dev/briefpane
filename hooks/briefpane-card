@@ -10,6 +10,8 @@
 //   briefpane-card phase <define|plan|build|verify|review|ship>
 //   briefpane-card next "<one line>"
 //   briefpane-card approve                 the human approves the plan
+//   briefpane-card finding <P0|P1|P2> "<what is wrong and where>"   reviewer
+//   briefpane-card dispose <R1> <fix|defer|reject> ["<note>"]       the human
 //   briefpane-card show | json | path
 //   briefpane-card gate                    Claude PreToolUse hook
 //   briefpane-card context                 Claude SessionStart hook
@@ -20,6 +22,8 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 const PHASES = ["define", "plan", "build", "verify", "review", "ship"];
+const SEVERITIES = ["P0", "P1", "P2"];
+const VERDICTS = ["fix", "defer", "reject"];
 const MAX_PLAN_LINES = 10;
 const ROOT = process.env.BRIEFPANE_CARDS ?? join(homedir(), "Documents/Obsidian Vault/MG/dev-system/cards");
 
@@ -52,7 +56,7 @@ function locate(dir) {
 }
 
 function parse(text) {
-  const card = { meta: {}, define: "", plan: "", proof: [], review: "", next: "" };
+  const card = { meta: {}, define: "", plan: "", proof: [], review: [], next: "" };
   const fm = text.match(/^---\n([\s\S]*?)\n---\n?/);
   if (fm) {
     for (const line of fm[1].split("\n")) {
@@ -71,6 +75,13 @@ function parse(text) {
         .map((l) => l.match(/^- \[( |x)\] (.*?)(?: \| (.*))?$/))
         .filter(Boolean)
         .map((m) => ({ done: m[1] === "x", claim: m[2], evidence: m[3] ?? "" }));
+    } else if (head === "review") {
+      // - R1 [open] P1 what is wrong | note
+      card.review = body
+        .split("\n")
+        .map((l) => l.match(/^- (R\d+) \[(\w+)\] (P\d) (.*?)(?: \| (.*))?$/))
+        .filter(Boolean)
+        .map((m) => ({ id: m[1], state: m[2], severity: m[3], summary: m[4], note: m[5] ?? "" }));
     } else if (head in card) card[head] = body;
   }
   return card;
@@ -81,7 +92,8 @@ function render(c) {
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
   const proof = c.proof.map((p) => `- [${p.done ? "x" : " "}] ${p.claim}${p.evidence ? ` | ${p.evidence}` : ""}`).join("\n");
-  return `---\n${meta}\n---\n\n## Define\n${c.define}\n\n## Plan\n${c.plan}\n\n## Proof\n${proof}\n\n## Review\n${c.review}\n\n## Next\n${c.next}\n`;
+  const review = c.review.map((r) => `- ${r.id} [${r.state}] ${r.severity} ${r.summary}${r.note ? ` | ${r.note}` : ""}`).join("\n");
+  return `---\n${meta}\n---\n\n## Define\n${c.define}\n\n## Plan\n${c.plan}\n\n## Proof\n${proof}\n\n## Review\n${review}\n\n## Next\n${c.next}\n`;
 }
 
 function load(loc) {
@@ -91,7 +103,7 @@ function load(loc) {
     define: "",
     plan: "",
     proof: [],
-    review: "",
+    review: [],
     next: "",
   };
 }
@@ -125,6 +137,7 @@ function summary(loc, c) {
     c.define && `Define: ${c.define}`,
     c.plan && `Plan:\n${c.plan}`,
     proof && `Proof:\n${proof}`,
+    c.review.length && `Review:\n${c.review.map((r) => `${r.id} [${r.state}] ${r.severity} ${r.summary}`).join("\n")}`,
     c.next && `Next: ${c.next}`,
   ]
     .filter(Boolean)
@@ -209,6 +222,29 @@ switch (cmd) {
     card.meta.phase = "build";
     save(loc, card);
     break;
+  case "builder":
+    // The pane whose agent built this, so review fixes can be sent back to it.
+    card.meta.builder = rest[0] ?? "";
+    save(loc, card);
+    break;
+  case "finding": {
+    if (!SEVERITIES.includes(rest[0])) die(`finding needs a severity: ${SEVERITIES.join(", ")}`);
+    if (!rest[1]) die("finding needs what is wrong and where");
+    const id = `R${card.review.length + 1}`;
+    card.review.push({ id, state: "open", severity: rest[0], summary: rest.slice(1).join(" "), note: "" });
+    save(loc, card);
+    console.log(id);
+    break;
+  }
+  case "dispose": {
+    const r = card.review.find((x) => x.id === rest[0]);
+    if (!r) die(`no finding ${rest[0]}`);
+    if (!VERDICTS.includes(rest[1])) die(`dispose needs ${VERDICTS.join(", ")}`);
+    r.state = rest[1];
+    r.note = rest.slice(2).join(" ");
+    save(loc, card);
+    break;
+  }
   default:
     die("usage: see the header of this file");
 }

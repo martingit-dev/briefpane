@@ -233,8 +233,9 @@ try {
   if (stateFile) rmSync(stateFile, { force: true });
   rmSync(REPO, { recursive: true, force: true });
   rmSync(`${REPO}-cards`, { recursive: true, force: true });
-  process.exit(process.exitCode ?? 0);
   try {
     tmux("kill-session", "-t", SESSION);
   } catch {}
+  // A lingering WebDriver socket would keep node alive.
+  process.exit(process.exitCode ?? 0);
 }

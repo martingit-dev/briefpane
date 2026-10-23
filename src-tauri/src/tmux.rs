@@ -50,6 +50,9 @@ pub struct Snapshot {
     text: String,
     cursor_x: u16,
     cursor_y: u16,
+    /// The pane's size when captured, so the view can wait out a resize.
+    width: u16,
+    height: u16,
 }
 
 fn tmux(args: &[&str]) -> Result<String, String> {
@@ -164,9 +167,10 @@ pub fn list_panes() -> Result<Vec<Pane>, String> {
 pub fn capture(pane: String) -> Result<Snapshot, String> {
     let history = tmux(&["capture-pane", "-p", "-e", "-S", "-5000", "-E", "-1", "-t", &pane])?;
     let text = tmux(&["capture-pane", "-p", "-e", "-t", &pane])?;
-    let cur = tmux(&["display-message", "-p", "-t", &pane, "#{cursor_x} #{cursor_y}"])?;
+    let cur = tmux(&["display-message", "-p", "-t", &pane, "#{cursor_x} #{cursor_y} #{pane_width} #{pane_height}"])?;
     let mut it = cur.split_whitespace().map(|n| n.parse().unwrap_or(0));
-    Ok(Snapshot { history, text, cursor_x: it.next().unwrap_or(0), cursor_y: it.next().unwrap_or(0) })
+    let mut next = || it.next().unwrap_or(0);
+    Ok(Snapshot { history, text, cursor_x: next(), cursor_y: next(), width: next(), height: next() })
 }
 
 /// Starts streaming a session's panes. Idempotent per session.
@@ -205,6 +209,10 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
                 }
                 Some(Event::Exit(_)) => break,
                 Some(Event::WindowAdd { .. } | Event::WindowClose { .. } | Event::WindowRenamed { .. }) => {
+                    let _ = app.emit("panes-changed", ());
+                }
+                // Pane sizes changed: a split, or another client took over the size.
+                Some(Event::Other(line)) if line.starts_with("%layout-change ") => {
                     let _ = app.emit("panes-changed", ());
                 }
                 _ => {}

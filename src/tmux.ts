@@ -22,7 +22,14 @@ export function statusOf(p: Pane): string {
   return p.state?.state ?? "idle";
 }
 
-export type Snapshot = { history: string; text: string; cursor_x: number; cursor_y: number };
+export type Snapshot = {
+  history: string;
+  text: string;
+  cursor_x: number;
+  cursor_y: number;
+  width: number;
+  height: number;
+};
 
 export type Output = { pane: string; data: number[] };
 

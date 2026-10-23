@@ -147,7 +147,32 @@ try {
   console.log("app: agent's answer rendered as markdown");
 
   // Back on the scratch repo's pane, Changes shows the edited file.
+  tmux("send-keys", "-t", SESSION, "clear; printf 'top\\nmiddle\\n'", "Enter");
+  await sleep(300);
   await row.click();
+
+  // Reopening a pane whose screen ends in blank rows puts the cursor where
+  // tmux has it, not shifted by the blank rows.
+  await waitFor("the reopened view to match tmux's cursor", async () => {
+    const [x, y] = tmux("display-message", "-p", "-t", SESSION, "#{cursor_x} #{cursor_y}").trim().split(" ").map(Number);
+    const tmuxLine = tmux("capture-pane", "-p", "-t", SESSION).split("\n")[y].trimEnd();
+    const view = await browser.execute(() => {
+      const b = window.__bpTerm?.buffer.active;
+      return b && { x: b.cursorX, y: b.cursorY, line: b.getLine(b.viewportY + b.cursorY)?.translateToString(true).trimEnd() };
+    });
+    return view && view.x === x && view.y === y && view.line === tmuxLine;
+  });
+  console.log("app: reopened pane has the cursor on tmux's row and column");
+
+  // A pane in a split gets only part of the window. The view must draw the
+  // pane's own size, or output lands on the wrong rows.
+  tmux("split-window", "-d", "-h", "-t", `${SESSION}:e2e`, "bash --norc --noprofile");
+  await waitFor("the view to follow the split pane's size", async () => {
+    const [w, h] = tmux("display-message", "-p", "-t", `${SESSION}:e2e.0`, "#{pane_width} #{pane_height}").trim().split(" ").map(Number);
+    const v = await browser.execute(() => [window.__bpTerm.cols, window.__bpTerm.rows]);
+    return v[0] === w && v[1] === h;
+  });
+  console.log(`app: view follows the split pane at ${tmux("display-message", "-p", "-t", `${SESSION}:e2e.0`, "#{pane_width}x#{pane_height}").trim()}`);
   await (await browser.$("button=Changes")).click();
   // The diff renders in a shadow root; read the edited line from there.
   await waitFor("the diff of hello.txt", async () =>

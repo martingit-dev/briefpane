@@ -1,0 +1,201 @@
+/* Linear and Cursor: warm near-black, quiet greys, small type, hairlines. */
+:root {
+  --bg: #14120f;
+  --pane: #1a1815;
+  --raise: #22201c;
+  --hover: #2a2723;
+  --line: rgb(255 255 255 / 8%);
+  --line2: rgb(255 255 255 / 14%);
+  --fg: #e9e6e1;
+  --dim: #9a958d;
+  --faint: #6c6861;
+  --amber: #d7a54a;
+  --red: #d9796f;
+  --term: #0f0e0c;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--pane);
+  color: var(--fg);
+  font-family: Inter, "Geist", ui-sans-serif, system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.mono {
+  font-family: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+.faint {
+  color: var(--faint);
+}
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+}
+.app.collapsed {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.side {
+  border-right: 1px solid var(--line);
+  padding: 8px 6px;
+  overflow-y: auto;
+}
+.cap {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 12px 10px 6px;
+}
+.iconbtn {
+  border: 0;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+.iconbtn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+.iconbtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.collapse {
+  margin: 2px 4px 2px auto;
+}
+.app.collapsed .collapse {
+  margin: 2px auto;
+}
+
+.task {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.task:hover {
+  background: var(--hover);
+}
+.task.on {
+  background: var(--raise);
+}
+.task .body {
+  display: grid;
+}
+.task .t,
+.task .s {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.task .s {
+  color: var(--faint);
+  font-size: 12px;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--faint);
+  margin: 6px 0 0 3px;
+}
+.dot.agent {
+  border-color: var(--dim);
+  background: var(--dim);
+}
+.err {
+  color: var(--red);
+  padding: 8px 10px;
+}
+
+.mid {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 0;
+}
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 16px 10px;
+}
+.termwrap {
+  margin: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--term);
+  padding: 8px 10px;
+  overflow: hidden;
+  min-height: 0;
+}
+.paneview {
+  height: 100%;
+}
+.paneview .xterm-viewport {
+  background: var(--term) !important;
+}
+
+.composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 16px 16px;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--raise);
+  padding: 6px 6px 6px 12px;
+}
+.composer input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  padding: 4px 0;
+}
+.composer input::placeholder {
+  color: var(--faint);
+}
+.empty {
+  grid-row: 1 / 4;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}

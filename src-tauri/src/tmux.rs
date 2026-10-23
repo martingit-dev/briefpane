@@ -93,6 +93,11 @@ fn id_of(list: &str, name: &str) -> Option<String> {
         .map(|(id, _)| id.to_string())
 }
 
+/// Named so a stuck thread can be told apart in `/proc/<pid>/task/*/comm`.
+fn spawn_named(name: &str, f: impl FnOnce() + Send + 'static) {
+    let _ = std::thread::Builder::new().name(name.into()).spawn(f);
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -431,7 +436,7 @@ impl Tmux {
             json!({ "session": session, "id": session_id, "serial": serial }),
         );
         let who = session.to_string();
-        std::thread::spawn(move || {
+        spawn_named("bp-write", move || {
             for line in rx {
                 if let Err(e) = stdin.write_all(&line) {
                     log::event(
@@ -445,7 +450,7 @@ impl Tmux {
 
         let registry = Arc::clone(&self.clients);
         let session = session.to_string();
-        std::thread::spawn(move || {
+        spawn_named("bp-read", move || {
             read(&notify, &session, stdout, &streams, &tx);
             // The session is gone: forget the client so the next attach starts afresh.
             {
@@ -532,30 +537,41 @@ struct Rates {
     panes: HashMap<String, (usize, usize)>,
 }
 
+/// A burst at least this big is reported when it ends, even within a second.
+const REPORT_BURST_BYTES: usize = 64 << 10;
+
 impl Rates {
     fn add(&mut self, pane: &str, bytes: usize) {
+        self.since.get_or_insert_with(Instant::now);
         let r = self.panes.entry(pane.to_string()).or_default();
         r.0 += bytes;
         r.1 += 1;
     }
 
-    fn report(&mut self) {
-        let since = *self.since.get_or_insert_with(Instant::now);
+    /// One line per pane once a second while busy, and at the end of a
+    /// large burst, which can finish well inside a second.
+    fn report(&mut self, burst_over: bool) {
+        let Some(since) = self.since else { return };
         let secs = since.elapsed().as_secs_f64();
-        if secs < 1.0 {
+        let bytes: usize = self.panes.values().map(|(b, _)| b).sum();
+        if secs < 1.0 && !(burst_over && bytes >= REPORT_BURST_BYTES) {
             return;
         }
+        let per_s = secs.max(0.001);
         for (pane, (bytes, frames)) in self.panes.drain() {
             log::event(
                 "stream",
                 json!({
                     "pane": pane,
-                    "bytes_s": (bytes as f64 / secs).round(),
-                    "frames_s": (frames as f64 / secs * 10.0).round() / 10.0,
+                    "bytes": bytes,
+                    "frames": frames,
+                    "secs": (secs * 1000.0).round() / 1000.0,
+                    "bytes_s": (bytes as f64 / per_s).round(),
+                    "frames_s": (frames as f64 / per_s * 10.0).round() / 10.0,
                 }),
             );
         }
-        self.since = Some(Instant::now());
+        self.since = None;
     }
 }
 
@@ -610,7 +626,8 @@ fn read(
                 || pending.bytes() >= FLUSH_BYTES
                 || last_flush.elapsed() >= FLUSH_EVERY)
         {
-            flush(&mut pending, streams, tx, &mut rates);
+            let burst_over = reader.buffer().is_empty();
+            flush(&mut pending, streams, tx, &mut rates, burst_over);
             last_flush = Instant::now();
         }
     }
@@ -621,6 +638,7 @@ fn flush(
     streams: &Mutex<Streams>,
     tx: &Sender<Vec<u8>>,
     rates: &mut Rates,
+    burst_over: bool,
 ) {
     let mut sends = Vec::new();
     {
@@ -657,7 +675,7 @@ fn flush(
             s.remove(tx, id);
         }
     }
-    rates.report();
+    rates.report(burst_over);
 }
 
 #[cfg(test)]
@@ -841,6 +859,33 @@ mod tests {
         assert!(s.off.contains(a) && s.off.contains(b));
         drop(s);
         t.unwatch(id).unwrap();
+
+        // A burst streams through to its last line.
+        tmux(&["new-window", "-d", "-t", "t:", "bash --norc --noprofile"]).unwrap();
+        let panes = tmux(&["list-panes", "-s", "-t", "t", "-F", "#{pane_id}"]).unwrap();
+        let burst = panes.lines().last().unwrap().to_string();
+        let got = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let sink = {
+            let got = Arc::clone(&got);
+            Channel::new(move |body| {
+                if let InvokeResponseBody::Raw(bytes) = body {
+                    lock(&got).extend_from_slice(&bytes);
+                }
+                Ok(())
+            })
+        };
+        t.watch("t", &burst, sink).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        t.send_keys("t", &burst, "seq 1 200000; echo DONE-BURST\r")
+            .unwrap();
+        let done = || String::from_utf8_lossy(&lock(&got)).contains("DONE-BURST\r\n");
+        let end = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < end && !done() {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let text = String::from_utf8_lossy(&lock(&got)).into_owned();
+        let tail = &text[text.len().saturating_sub(200)..];
+        assert!(done(), "{} bytes, tail {tail:?}", text.len());
 
         let _ = tmux(&["kill-server"]);
         let _ = std::fs::remove_dir_all(&dir);

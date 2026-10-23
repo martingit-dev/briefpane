@@ -9,7 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
 import { remote } from "webdriverio";
 
-const APP = `${homedir()}/.local/lib/briefpane/briefpane`;
+const APP = process.env.BRIEFPANE_APP ?? `${homedir()}/.local/lib/briefpane/briefpane`;
 const SESSION = "bp-release";
 const tmux = (...args) => execFileSync("tmux", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 
@@ -33,7 +33,9 @@ process.env.BRIEFPANE_LOG = `${REPO}.jsonl`;
 process.env.BRIEFPANE_CARDS = `${REPO}-cards`;
 
 tmux("new-session", "-d", "-s", SESSION, "-c", REPO, "bash --norc --noprofile");
-const driver = spawn("tauri-driver", [], { stdio: "ignore" });
+const driver = spawn("tauri-driver", [], {
+  stdio: ["ignore", "ignore", process.env.BRIEFPANE_DRIVER_ERR ? "inherit" : "ignore"],
+});
 let browser;
 try {
   await sleep(1000);
@@ -48,11 +50,16 @@ try {
   await row.waitForExist({ timeout: 15_000 });
   await row.click();
 
-  const token = `bp-rel-${process.pid}`;
-  await (await browser.$(".xterm-helper-textarea")).addValue(`echo ${token}`);
-  // The release build has no test hook on the terminal, so read xterm's own rows.
-  await waitFor("output in the view", async () =>
-    (await browser.execute(() => document.querySelector(".xterm-rows")?.textContent ?? "")).includes(`${token}`),
+  await browser.waitUntil(async () => (await browser.$(`.paneview[data-ready="${pane}"]`)).isExisting(), {
+    timeout: 15_000,
+  });
+  // WebKit stops painting an off-screen window and a release build has no
+  // hook on the terminal, so streaming is proven by the app's own stream line.
+  await (await browser.$(".xterm-helper-textarea")).addValue("seq 1 200000\uE007");
+  await waitFor("a stream line for the pane", () =>
+    readFileSync(process.env.BRIEFPANE_LOG, "utf8")
+      .split("\n")
+      .some((l) => l.includes('"kind":"stream"') && l.includes(`"pane":"${pane}"`)),
   );
   console.log("release: pane output streams into the view");
   if (await browser.execute(() => "__bpTerm" in window)) throw new Error("the release build exposes test hooks");
@@ -78,6 +85,21 @@ try {
   console.log("release: no errors in the log");
 } catch (e) {
   console.error(e);
+  try {
+    console.error("pane:", tmux("capture-pane", "-p", "-t", SESSION).trim().slice(-300));
+    console.error(
+      "view:",
+      await browser.execute(() => document.querySelector(".xterm-rows")?.textContent?.slice(-300)),
+    );
+    console.error(
+      "log:",
+      readFileSync(process.env.BRIEFPANE_LOG, "utf8")
+        .split("\n")
+        .filter((l) => !l.includes('"spawn"'))
+        .slice(-15)
+        .join("\n"),
+    );
+  } catch {}
   process.exitCode = 1;
 } finally {
   await Promise.race([browser?.deleteSession().catch(() => {}), sleep(5_000)]);
@@ -87,6 +109,6 @@ try {
   } catch {}
   rmSync(REPO, { recursive: true, force: true });
   rmSync(`${REPO}-cards`, { recursive: true, force: true });
-  rmSync(`${REPO}.jsonl`, { force: true });
+  if (!process.env.BRIEFPANE_KEEP_LOG) rmSync(`${REPO}.jsonl`, { force: true });
   process.exit();
 }

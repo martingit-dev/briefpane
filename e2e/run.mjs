@@ -80,7 +80,7 @@ try {
     capabilities: { "tauri:options": { application: APP }, "wdio:enforceWebDriverClassic": true },
   });
 
-  const row = await browser.$(`button.task*=${SESSION}`);
+  const row = await browser.$(`button.task[data-pane="${tmux("display", "-p", "-t", SESSION, "#{pane_id}").trim()}"]`);
   await row.waitForExist({ timeout: 10_000 });
   await row.click();
 

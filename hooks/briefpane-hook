@@ -6,10 +6,14 @@ set -euo pipefail
 [ -n "${TMUX_PANE:-}" ] || exit 0
 agent=$1 state=$2
 if [ $# -ge 3 ]; then event=$3; elif [ ! -t 0 ]; then event=$(cat); else event='{}'; fi
-message=$(jq -r '.message // empty' <<<"$event" 2>/dev/null || true)
+field() { jq -r "$1 // empty" <<<"$event" 2>/dev/null || true; }
+message=$(field .message)
+transcript=$(field .transcript_path)        # Claude: the session's JSONL
+last=$(field '.["last-assistant-message"]') # Codex: its final answer
 dir="${XDG_STATE_HOME:-$HOME/.local/state}/briefpane/panes"
 mkdir -p "$dir"
 file="$dir/${TMUX_PANE#%}.json"
-jq -n --arg agent "$agent" --arg state "$state" --arg message "$message" --argjson at "$(date +%s)" \
-  '{agent: $agent, state: $state, message: $message, at: $at}' >"$file.tmp"
+jq -n --arg agent "$agent" --arg state "$state" --arg message "$message" \
+  --arg transcript "$transcript" --arg last "$last" --argjson at "$(date +%s)" \
+  '{agent: $agent, state: $state, message: $message, transcript: $transcript, last: $last, at: $at}' >"$file.tmp"
 mv "$file.tmp" "$file"

@@ -53,10 +53,10 @@ button {
 .app {
   height: 100%;
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1.3fr) minmax(0, 1fr);
 }
 .app.collapsed {
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 44px minmax(0, 1.3fr) minmax(0, 1fr);
 }
 
 .side {
@@ -227,4 +227,103 @@ button {
 .paneview .xterm-viewport {
   scrollbar-width: thin;
   scrollbar-color: var(--hover) transparent;
+}
+
+.right {
+  border-left: 1px solid var(--line);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+.rtabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.rtabs button {
+  border: 0;
+  background: none;
+  padding: 3px 10px;
+  border-radius: 6px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.rtabs button.on {
+  background: var(--raise);
+  color: var(--fg);
+}
+.rtabs .n {
+  color: var(--amber);
+  margin-left: 5px;
+}
+.rbody {
+  overflow-y: auto;
+  padding: 12px 16px;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hover) transparent;
+}
+.ask {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  background: var(--raise);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+.ask .dot {
+  margin-top: 6px;
+  flex: none;
+}
+.md {
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.md :is(h1, h2, h3) {
+  font-size: 14px;
+  margin: 16px 0 6px;
+}
+.md p,
+.md ul,
+.md ol {
+  margin: 0 0 10px;
+}
+.md ul,
+.md ol {
+  padding-left: 20px;
+}
+.md code {
+  font-family: "JetBrains Mono", "Geist Mono", ui-monospace, monospace;
+  font-size: 12px;
+  background: var(--raise);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.md pre {
+  background: var(--term);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  padding: 0;
+}
+.md a {
+  color: var(--fg);
+}
+.file {
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 12px;
+}
+.file > p {
+  padding: 8px 10px;
+  margin: 0;
 }

@@ -106,10 +106,14 @@ pub struct AgentState {
     state: String,
     #[serde(default)]
     message: String,
+    #[serde(default)]
+    pub transcript: String,
+    #[serde(default)]
+    pub last: String,
     at: u64,
 }
 
-fn state_of(pane_id: &str) -> Option<AgentState> {
+pub fn state_of(pane_id: &str) -> Option<AgentState> {
     let dir = std::env::var("XDG_STATE_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/state"));

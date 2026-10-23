@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PaneView } from "./PaneView";
+import { RightPanel } from "./RightPanel";
 import { listPanes, type Pane, sendKeys, statusOf, taskOf } from "./tmux";
 
 const repoOf = (p: Pane) => p.path.split("/").filter(Boolean).pop() ?? p.path;
@@ -77,6 +78,7 @@ export default function App() {
                 <button
                   type="button"
                   key={p.pane_id}
+                  data-pane={p.pane_id}
                   className={`task ${p.pane_id === selected ? "on" : ""}`}
                   onClick={() => setSelected(p.pane_id)}
                 >
@@ -126,6 +128,7 @@ export default function App() {
           <div className="empty">Pick a pane.</div>
         )}
       </main>
+      {pane && <RightPanel pane={pane} />}
     </div>
   );
 }

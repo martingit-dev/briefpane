@@ -26,6 +26,8 @@ export function PaneView({ pane }: { pane: Pane }) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(el);
+    // The e2e test reads the buffer: WebKit stops painting a window that is off screen.
+    (window as unknown as { __bpTerm: Terminal }).__bpTerm = term;
     fit.fit();
 
     let live = true;
@@ -53,6 +55,9 @@ export function PaneView({ pane }: { pane: Pane }) {
       term.write(`\x1b[${s.cursor_y + 1};${s.cursor_x + 1}H`);
       for (const b of buffered) term.write(b);
       primed = true;
+    }).catch((err) => {
+      // Surfaced on the element so a failed attach is visible, not a blank pane.
+      el.dataset.error = String(err);
     });
 
     let pending: ReturnType<typeof setTimeout> | undefined;

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Builds the release app and installs it for this user: the binary in
+# ~/.local/bin, an icon and a launcher entry so it starts from the app menu.
+set -euo pipefail
+root=$(dirname "$(dirname "$(readlink -f "$0")")")
+cd "$root"
+pnpm tauri build --no-bundle
+install -Dm755 src-tauri/target/release/briefpane "$HOME/.local/lib/briefpane/briefpane"
+# The app menu starts apps without the shell's PATH, so node (nvm) and
+# ~/.local/bin, which the card hook needs, are pinned here at install time.
+node_dir=$(dirname "$(command -v node)")
+cat >"$HOME/.local/bin/briefpane" <<WRAP
+#!/bin/sh
+export PATH="$node_dir:\$HOME/.local/bin:\$PATH"
+exec "\$HOME/.local/lib/briefpane/briefpane" "\$@"
+WRAP
+chmod 755 "$HOME/.local/bin/briefpane"
+install -Dm644 src-tauri/icons/128x128.png "$HOME/.local/share/icons/hicolor/128x128/apps/briefpane.png"
+install -Dm644 src-tauri/icons/icon.png "$HOME/.local/share/icons/hicolor/512x512/apps/briefpane.png"
+cat >"$HOME/.local/share/applications/briefpane.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Briefpane
+Comment=Your agents, their proof and the code
+Exec=$HOME/.local/bin/briefpane
+Icon=briefpane
+Terminal=false
+Categories=Development;
+StartupWMClass=briefpane
+EOF
+update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+echo "installed: $HOME/.local/bin/briefpane, launcher Briefpane"

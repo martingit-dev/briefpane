@@ -121,7 +121,21 @@ export function PaneView({ pane }: { pane: Pane }) {
     });
     observer.observe(el);
 
-    const input = term.onData((d) => void sendKeys(session, pane_id, d));
+    // With `window-size latest`, typing in another terminal on this session
+    // takes the size back. Using the view here claims it again.
+    // Asked at most once a second; tmux ignores a size it already has.
+    let claimed = 0;
+    const claim = () => {
+      if (Date.now() - claimed < 1000) return;
+      claimed = Date.now();
+      const w = wanted();
+      if (w) void resize(session, w.cols, w.rows).catch(() => {});
+    };
+    const input = term.onData((d) => {
+      claim();
+      void sendKeys(session, pane_id, d);
+    });
+    term.textarea?.addEventListener("focus", claim);
     term.focus();
 
     return () => {
@@ -130,6 +144,7 @@ export function PaneView({ pane }: { pane: Pane }) {
       unlisten?.();
       observer.disconnect();
       input.dispose();
+      term.textarea?.removeEventListener("focus", claim);
       termRef.current = null;
       term.dispose();
     };

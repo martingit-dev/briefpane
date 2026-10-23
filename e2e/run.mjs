@@ -61,7 +61,12 @@ tmux("new-session", "-d", "-s", SESSION, "-n", "e2e", "-c", REPO, "-x", "100", "
 
 const stub = mkdtempSync(`${tmpdir()}/bp-stub-`);
 process.env.BRIEFPANE_CLAUDE = `${stub}/claude`;
-const driver = spawn("tauri-driver", [], { stdio: "ignore" });
+// A stub xdg-open records what the app hands to the system browser.
+writeFileSync(`${stub}/xdg-open`, `#!/bin/sh\necho "$1" >>"${stub}/opened"\n`, { mode: 0o755 });
+const driver = spawn("tauri-driver", [], {
+  stdio: "ignore",
+  env: { ...process.env, PATH: `${stub}:${process.env.PATH}` },
+});
 let browser;
 let stateFile;
 try {
@@ -338,6 +343,58 @@ try {
   await openAgain(`${TOKEN}-b`);
   tmux("kill-session", "-t", AGAIN);
   console.log("app: a recreated session streams again");
+
+  // A clicked link opens in the browser and the window stays on the app.
+  const home = await browser.execute(() => location.href);
+  await browser.execute(() => {
+    const a = document.createElement("a");
+    a.href = "https://example.com/bp-e2e";
+    a.textContent = "link";
+    document.body.append(a);
+    a.click();
+  });
+  await waitFor("the link to reach the browser", () => {
+    try {
+      return readFileSync(`${stub}/opened`, "utf8").includes("https://example.com/bp-e2e");
+    } catch {
+      return false;
+    }
+  });
+  if ((await browser.execute(() => location.href)) !== home) throw new Error("the window left the app");
+  console.log("app: a link opens in the browser and the app stays put");
+
+  // Typing in another terminal takes the window's size; typing in the app takes it back.
+  const sizePane = tmux(
+    "new-window",
+    "-d",
+    "-P",
+    "-F",
+    "#{pane_id}",
+    "-t",
+    `${SESSION}:`,
+    "bash --norc --noprofile",
+  ).trim();
+  const widthOf = () => Number(tmux("display", "-p", "-t", sizePane, "#{window_width}").trim());
+  const sizeRow = await browser.$(`button.task[data-pane="${sizePane}"]`);
+  await sizeRow.waitForExist({ timeout: 10_000 });
+  await sizeRow.click();
+  await sleep(1500);
+  const appWidth = widthOf();
+  const other = spawn("script", ["-qfc", `stty cols 200 rows 50; tmux attach -t ${SESSION}`, "/dev/null"], {
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  try {
+    await sleep(1000);
+    tmux("select-window", "-t", sizePane);
+    other.stdin.write(" ");
+    await waitFor("the other terminal to take the size", () => widthOf() === 200);
+    await sleep(1100);
+    await (await browser.$(".xterm-helper-textarea")).addValue(" ");
+    await waitFor(`the app to take the size back from 200 to ${appWidth}`, () => widthOf() === appWidth);
+  } finally {
+    other.kill();
+  }
+  console.log(`app: typing in the app takes the size back (200 to ${appWidth} cols)`);
 
   // Best effort: WebKit waits for a paint that never comes off screen.
   const shot = await Promise.race([

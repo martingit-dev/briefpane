@@ -18,8 +18,15 @@ use tmux_cc::{Event, Parser, send_keys_hex};
 /// recreated session of the same name.
 #[derive(Default)]
 pub struct Tmux {
-    clients: Arc<Mutex<HashMap<String, (u64, ChildStdin)>>>,
+    clients: Arc<Mutex<HashMap<String, Client>>>,
     serial: AtomicU64,
+}
+
+struct Client {
+    serial: u64,
+    /// `$N`: safe on a control-mode command line, unlike a session name.
+    session_id: String,
+    stdin: ChildStdin,
 }
 
 /// A tmux pane id such as `%12`. Anything else is refused: the id is
@@ -276,8 +283,11 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
     if clients.contains_key(&session) {
         return Ok(());
     }
+    let session_id = tmux(&["display-message", "-p", "-t", &session, "#{session_id}"])?
+        .trim()
+        .to_string();
     let mut child = Command::new("tmux")
-        .args(["-C", "attach-session", "-t", &session])
+        .args(["-C", "attach-session", "-t", &session_id])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -287,7 +297,11 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
     let serial = state.serial.fetch_add(1, Ordering::Relaxed);
     clients.insert(
         session.clone(),
-        (serial, child.stdin.take().ok_or("no stdin")?),
+        Client {
+            serial,
+            session_id,
+            stdin: child.stdin.take().ok_or("no stdin")?,
+        },
     );
     let registry = Arc::clone(&state.clients);
 
@@ -326,7 +340,7 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
         // The session is gone: forget the client so the next attach starts afresh.
         {
             let mut clients = registry.lock().unwrap();
-            if clients.get(&session).is_some_and(|(s, _)| *s == serial) {
+            if clients.get(&session).is_some_and(|c| c.serial == serial) {
                 clients.remove(&session);
             }
         }
@@ -345,19 +359,28 @@ pub fn send_keys(
 ) -> Result<(), String> {
     pane_id_ok(&pane)?;
     let mut clients = state.clients.lock().unwrap();
-    let (_, stdin) = clients.get_mut(&session).ok_or("session not attached")?;
-    stdin
+    let client = clients.get_mut(&session).ok_or("session not attached")?;
+    client
+        .stdin
         .write_all(send_keys_hex(&pane, data.as_bytes()).as_bytes())
         .map_err(|e| e.to_string())
 }
 
 /// Sets this client's size, so the window fits the view while you use it.
+/// `switch-client` first makes the app the latest client: once another
+/// terminal has typed, tmux sizes the window to that terminal and ignores
+/// `refresh-client -C` alone.
 #[tauri::command]
 pub fn resize(state: State<Tmux>, session: String, cols: u16, rows: u16) -> Result<(), String> {
     let mut clients = state.clients.lock().unwrap();
-    let (_, stdin) = clients.get_mut(&session).ok_or("session not attached")?;
-    stdin
-        .write_all(format!("refresh-client -C {cols}x{rows}\n").as_bytes())
+    let client = clients.get_mut(&session).ok_or("session not attached")?;
+    let cmd = format!(
+        "switch-client -t {}\nrefresh-client -C {cols}x{rows}\n",
+        client.session_id
+    );
+    client
+        .stdin
+        .write_all(cmd.as_bytes())
         .map_err(|e| e.to_string())
 }
 

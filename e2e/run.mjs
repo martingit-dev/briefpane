@@ -96,6 +96,21 @@ try {
   });
   console.log("app: output rendered in the pane view");
 
+  // Keys a TUI relies on reach the pane as the same bytes a terminal sends.
+  // `cat -v` echoes them visibly: arrows, Shift+Tab, Esc, Ctrl+C.
+  await textarea.addValue("cat -v\uE007");
+  await sleep(300);
+  await browser.keys(["ArrowUp", "ArrowDown"]);
+  await browser.keys(["Shift", "Tab", "Shift"]);
+  await browser.keys(["Escape", "Enter"]);
+  await waitFor("special keys in the pane", () => {
+    const shown = tmux("capture-pane", "-p", "-t", SESSION);
+    return ["^[[A", "^[[B", "^[[Z", "^["].every((k) => shown.includes(k));
+  });
+  await browser.keys(["Control", "c", "Control"]);
+  await waitFor("Ctrl+C to end cat", () => tmux("display-message", "-p", "-t", SESSION, "#{pane_current_command}").trim() === "bash");
+  console.log("tmux: arrows, Shift+Tab, Esc and Ctrl+C arrive as a terminal sends them");
+
   // The view owns the size while in use: the pane takes the view's columns and rows.
   const view = await browser.execute(() => `${window.__bpTerm.cols}x${window.__bpTerm.rows}`);
   await waitFor("the pane to fit the view", () => tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim() === view);

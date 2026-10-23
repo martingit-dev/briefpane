@@ -1,0 +1,214 @@
+#!/usr/bin/env node
+// The task card: one markdown file per repo and branch, shared by the agent
+// (writes Define, Plan, Proof) and Briefpane (shows it, approves the Plan).
+// Cards live in $BRIEFPANE_CARDS, default the vault's MG/dev-system/cards.
+//
+//   briefpane-card define "<when X, I see Y>"
+//   briefpane-card plan < plan.md          at most 10 lines, names the proof
+//   briefpane-card proof "<claim>"         a proof the plan promises
+//   briefpane-card proven <n> "<evidence>" tick proof n with its evidence
+//   briefpane-card phase <define|plan|build|verify|review|ship>
+//   briefpane-card next "<one line>"
+//   briefpane-card approve                 the human approves the plan
+//   briefpane-card show | json | path
+//   briefpane-card gate                    Claude PreToolUse hook
+//   briefpane-card context                 Claude SessionStart hook
+// Every command takes --cwd <dir>; the default is the current directory.
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
+
+const PHASES = ["define", "plan", "build", "verify", "review", "ship"];
+const MAX_PLAN_LINES = 10;
+const ROOT = process.env.BRIEFPANE_CARDS ?? join(homedir(), "Documents/Obsidian Vault/MG/dev-system/cards");
+
+const args = process.argv.slice(2);
+const at = args.indexOf("--cwd");
+const cwd = at >= 0 ? args.splice(at, 2)[1] : process.cwd();
+const [cmd, ...rest] = args;
+
+/** Local wall-clock time to the minute, e.g. 2026-10-23T17:05. */
+function stamp() {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
+function git(dir, ...a) {
+  try {
+    return execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/** The card for the repo and branch that contain `dir`, or null outside git. */
+function locate(dir) {
+  const top = git(dir, "rev-parse", "--show-toplevel");
+  if (!top) return null;
+  const branch = git(dir, "branch", "--show-current") || "detached";
+  const repo = basename(top);
+  return { repo, branch, path: join(ROOT, repo, `${branch.replaceAll("/", "--")}.md`) };
+}
+
+function parse(text) {
+  const card = { meta: {}, define: "", plan: "", proof: [], review: "", next: "" };
+  const fm = text.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (fm) {
+    for (const line of fm[1].split("\n")) {
+      const m = line.match(/^(\w+):\s*(.*)$/);
+      if (m) card.meta[m[1]] = m[2];
+    }
+    text = text.slice(fm[0].length);
+  }
+  for (const part of text.split(/^## /m).slice(1)) {
+    const nl = part.indexOf("\n");
+    const head = part.slice(0, nl < 0 ? undefined : nl).trim().toLowerCase();
+    const body = nl < 0 ? "" : part.slice(nl + 1).trim();
+    if (head === "proof") {
+      card.proof = body
+        .split("\n")
+        .map((l) => l.match(/^- \[( |x)\] (.*?)(?: \| (.*))?$/))
+        .filter(Boolean)
+        .map((m) => ({ done: m[1] === "x", claim: m[2], evidence: m[3] ?? "" }));
+    } else if (head in card) card[head] = body;
+  }
+  return card;
+}
+
+function render(c) {
+  const meta = Object.entries(c.meta)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\n");
+  const proof = c.proof.map((p) => `- [${p.done ? "x" : " "}] ${p.claim}${p.evidence ? ` | ${p.evidence}` : ""}`).join("\n");
+  return `---\n${meta}\n---\n\n## Define\n${c.define}\n\n## Plan\n${c.plan}\n\n## Proof\n${proof}\n\n## Review\n${c.review}\n\n## Next\n${c.next}\n`;
+}
+
+function load(loc) {
+  if (existsSync(loc.path)) return parse(readFileSync(loc.path, "utf8"));
+  return {
+    meta: { repo: loc.repo, branch: loc.branch, phase: "define", plan_approved: "" },
+    define: "",
+    plan: "",
+    proof: [],
+    review: "",
+    next: "",
+  };
+}
+
+function save(loc, card) {
+  card.meta.updated = stamp();
+  mkdirSync(dirname(loc.path), { recursive: true });
+  writeFileSync(`${loc.path}.tmp`, render(card));
+  renameSync(`${loc.path}.tmp`, loc.path);
+}
+
+function die(msg, code = 1) {
+  process.stderr.write(`briefpane-card: ${msg}\n`);
+  process.exit(code);
+}
+
+function stdin() {
+  try {
+    return readFileSync(0, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+const HOWTO = `Work through this card with \`briefpane-card\`: \`define "<when X, I see Y>"\`, \`plan\` (stdin, at most ${MAX_PLAN_LINES} lines, name the proof), \`proof "<claim>"\` for each proof, then stop and ask the human to approve the plan in Briefpane. File edits are refused until they do. After building, \`proven <n> "<evidence from the running stack>"\` for each proof, and \`next "<one line>"\` before you stop.`;
+
+function summary(loc, c) {
+  const proof = c.proof.map((p, i) => `${i + 1}. [${p.done ? "x" : " "}] ${p.claim}${p.evidence ? ` (${p.evidence})` : ""}`).join("\n");
+  return [
+    `Briefpane card ${loc.repo}/${loc.branch}: phase ${c.meta.phase}, plan ${c.meta.plan_approved ? "approved" : "not approved"}.`,
+    c.define && `Define: ${c.define}`,
+    c.plan && `Plan:\n${c.plan}`,
+    proof && `Proof:\n${proof}`,
+    c.next && `Next: ${c.next}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+// Hooks read the event from stdin and must never crash the agent.
+if (cmd === "gate" || cmd === "context") {
+  let event = {};
+  try {
+    event = JSON.parse(stdin() || "{}");
+  } catch {}
+  const loc = locate(event.cwd ?? cwd);
+  if (!loc || !existsSync(loc.path)) process.exit(0);
+  const c = load(loc);
+  if (cmd === "context") {
+    process.stdout.write(`${summary(loc, c)}\n\n${HOWTO}\n`);
+    process.exit(0);
+  }
+  if (!c.meta.plan_approved) {
+    die(`plan for ${loc.repo}/${loc.branch} is not approved yet. Write it with \`briefpane-card plan\`, then ask the human to approve it in Briefpane.`, 2);
+  }
+  process.exit(0);
+}
+
+const loc = locate(cwd);
+if (!loc) die(`${cwd} is not in a git repo`);
+const card = load(loc);
+
+switch (cmd) {
+  case "path":
+    console.log(loc.path);
+    break;
+  case "json":
+    console.log(JSON.stringify(existsSync(loc.path) ? { path: loc.path, ...card } : null));
+    break;
+  case "show":
+    console.log(existsSync(loc.path) ? summary(loc, card) : `No card for ${loc.repo}/${loc.branch}.`);
+    break;
+  case "define":
+    if (!rest[0]) die('define needs "<when X, I see Y>"');
+    card.define = rest.join(" ");
+    card.meta.phase = "plan";
+    save(loc, card);
+    break;
+  case "plan": {
+    const plan = stdin().trim();
+    if (!plan) die("pipe the plan in on stdin");
+    if (plan.split("\n").length > MAX_PLAN_LINES) die(`plan has more than ${MAX_PLAN_LINES} lines`);
+    card.plan = plan;
+    card.meta.plan_approved = "";
+    save(loc, card);
+    break;
+  }
+  case "proof":
+    if (!rest[0]) die('proof needs "<claim>"');
+    card.proof.push({ done: false, claim: rest.join(" "), evidence: "" });
+    save(loc, card);
+    break;
+  case "proven": {
+    const n = Number(rest[0]);
+    const p = card.proof[n - 1];
+    if (!p) die(`no proof ${rest[0]}; there are ${card.proof.length}`);
+    if (!rest[1]) die("proven needs the evidence");
+    p.done = true;
+    p.evidence = rest.slice(1).join(" ");
+    save(loc, card);
+    break;
+  }
+  case "phase":
+    if (!PHASES.includes(rest[0])) die(`phase is one of ${PHASES.join(", ")}`);
+    card.meta.phase = rest[0];
+    save(loc, card);
+    break;
+  case "next":
+    card.next = rest.join(" ");
+    save(loc, card);
+    break;
+  case "approve":
+    if (!card.plan) die("there is no plan to approve");
+    card.meta.plan_approved = stamp();
+    card.meta.phase = "build";
+    save(loc, card);
+    break;
+  default:
+    die("usage: see the header of this file");
+}

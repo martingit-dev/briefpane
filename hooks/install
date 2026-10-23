@@ -4,12 +4,18 @@
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 ln -sf "$here/briefpane-hook" "$HOME/.local/bin/briefpane-hook"
+ln -sf "$here/briefpane-card" "$HOME/.local/bin/briefpane-card"
 
 claude="$HOME/.claude/settings.json"
 cp "$claude" "$claude.bak-briefpane"
 h() { printf '[{"hooks":[{"type":"command","command":"briefpane-hook claude %s"}]}]' "$1"; }
+# The plan gate refuses file edits while the branch's card is unapproved;
+# SessionStart prints the card back after startup, resume or compaction.
+gate='[{"matcher":"Edit|Write|MultiEdit|NotebookEdit","hooks":[{"type":"command","command":"briefpane-card gate"}]}]'
+context='[{"hooks":[{"type":"command","command":"briefpane-card context"}]}]'
 jq --argjson w "$(h working)" --argjson n "$(h needs-you)" --argjson d "$(h done)" \
-  '.hooks = ((.hooks // {}) + {UserPromptSubmit: $w, PostToolUse: $w, Notification: $n, Stop: $d})' \
+  --argjson g "$gate" --argjson c "$context" \
+  '.hooks = ((.hooks // {}) + {UserPromptSubmit: $w, PostToolUse: $w, Notification: $n, Stop: $d, PreToolUse: $g, SessionStart: $c})' \
   "$claude.bak-briefpane" >"$claude"
 echo "claude: hooks set in $claude"
 

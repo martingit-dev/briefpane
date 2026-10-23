@@ -13,6 +13,8 @@ pub fn run() {
             tmux::resize,
             brief::brief,
             brief::changes,
+            brief::card,
+            brief::approve_plan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

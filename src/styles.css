@@ -170,15 +170,45 @@ button {
 
 .mid {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
+  padding-bottom: 16px;
 }
 .head {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  padding: 12px 16px 10px;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+}
+.head .title {
+  display: grid;
+  flex: 1;
+}
+.head .title b,
+.head .title span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.phase {
+  display: flex;
+  gap: 2px;
+}
+.phase span {
+  font-size: 11.5px;
+  color: var(--faint);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: capitalize;
+}
+.phase span.done {
+  color: var(--dim);
+}
+.phase span.on {
+  color: var(--fg);
+  border-color: var(--line2);
+  background: var(--raise);
 }
 .termwrap {
   margin: 0 16px;
@@ -196,28 +226,6 @@ button {
   background: var(--term) !important;
 }
 
-.composer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 12px 16px 16px;
-  border: 1px solid var(--line2);
-  border-radius: 8px;
-  background: var(--raise);
-  padding: 6px 6px 6px 12px;
-}
-.composer input {
-  flex: 1;
-  border: 0;
-  outline: 0;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  padding: 4px 0;
-}
-.composer input::placeholder {
-  color: var(--faint);
-}
 .empty {
   grid-row: 1 / 4;
   display: grid;
@@ -326,4 +334,50 @@ button {
 .file > p {
   padding: 8px 10px;
   margin: 0;
+}
+
+.card section {
+  margin-bottom: 16px;
+}
+.card .cap {
+  padding: 0 0 6px;
+}
+.plan {
+  font-family: inherit;
+  white-space: pre-wrap;
+  margin: 0;
+  line-height: 1.6;
+}
+.gatebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--amber);
+  background: rgb(215 165 74 / 8%);
+  border-radius: 0 6px 6px 0;
+}
+.btn {
+  font-size: 12px;
+  border-radius: 6px;
+  padding: 4px 11px;
+  border: 1px solid var(--line2);
+  background: transparent;
+  cursor: pointer;
+}
+.btn.pri {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: var(--fg);
+}
+.proof {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 6px;
+  padding: 3px 0;
+}
+.proof .dot {
+  margin: 6px 0 0;
 }

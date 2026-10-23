@@ -34,6 +34,19 @@ export const resize = (session: string, cols: number, rows: number) =>
 export type FileChange = { name: string; status: string; old: string | null; new: string | null };
 export const brief = (pane: string) => invoke<string | null>("brief", { pane });
 export const changes = (path: string) => invoke<FileChange[]>("changes", { path });
+export type Proof = { done: boolean; claim: string; evidence: string };
+export type Card = {
+  path: string;
+  meta: { repo: string; branch: string; phase: string; plan_approved: string; updated?: string };
+  define: string;
+  plan: string;
+  proof: Proof[];
+  review: string;
+  next: string;
+};
+export const PHASES = ["define", "plan", "build", "verify", "review", "ship"] as const;
+export const card = (path: string) => invoke<Card | null>("card", { path });
+export const approvePlan = (path: string) => invoke<void>("approve_plan", { path });
 export const sendKeys = (session: string, pane: string, data: string) =>
   invoke<void>("send_keys", { session, pane, data });
 

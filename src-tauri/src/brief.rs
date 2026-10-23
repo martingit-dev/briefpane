@@ -100,3 +100,31 @@ pub fn changes(path: String) -> Vec<FileChange> {
         })
         .collect()
 }
+
+fn card_cli(path: &str, args: &[&str]) -> Result<String, String> {
+    // A desktop launch may not have ~/.local/bin on PATH.
+    let local = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/bin/briefpane-card");
+    let bin = if local.exists() { local } else { "briefpane-card".into() };
+    let out = Command::new(bin)
+        .args(args)
+        .args(["--cwd", path])
+        .output()
+        .map_err(|e| format!("briefpane-card: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The task card for the repo and branch at `path`, as `briefpane-card json`
+/// prints it; `null` when there is none. One parser, shared with the agents.
+#[tauri::command]
+pub fn card(path: String) -> Result<Value, String> {
+    serde_json::from_str(&card_cli(&path, &["json"])?).map_err(|e| e.to_string())
+}
+
+/// The human approves the card's plan, which lifts the edit gate.
+#[tauri::command]
+pub fn approve_plan(path: String) -> Result<(), String> {
+    card_cli(&path, &["approve"]).map(|_| ())
+}

@@ -1,5 +1,5 @@
 // End-to-end check against the real app and a real tmux session: pick a
-// pane in the sidebar, type into the composer, prove the text reached tmux
+// pane in the sidebar, type into its terminal, prove the text reached tmux
 // and came back into the rendered pane. Saves a screenshot of the window.
 //
 // Needs: tauri-driver on PATH, WebKitWebDriver, and a binary from
@@ -39,6 +39,22 @@ git("add", ".");
 git("-c", "user.name=e2e", "-c", "user.email=e2e@local", "commit", "-qm", "init");
 writeFileSync(`${REPO}/hello.txt`, "one\nthree\n");
 
+// Cards for this run go to a scratch folder; the app inherits this through tauri-driver.
+process.env.BRIEFPANE_CARDS = `${REPO}-cards`;
+const cardCli = (args, input) =>
+  execFileSync("briefpane-card", [...args, "--cwd", REPO], { input, encoding: "utf8" });
+const gate = () => {
+  try {
+    execFileSync("briefpane-card", ["gate"], { input: JSON.stringify({ cwd: REPO }), stdio: ["pipe", "ignore", "ignore"] });
+    return 0;
+  } catch (e) {
+    return e.status;
+  }
+};
+cardCli(["define", "When I open the repo, I see hello.txt changed"]);
+cardCli(["plan"], "1. Edit hello.txt\n2. Prove it in Changes");
+cardCli(["proof", "Changes lists hello.txt"]);
+
 tmux("new-session", "-d", "-s", SESSION, "-n", "e2e", "-c", REPO, "-x", "100", "-y", "30", "bash --norc --noprofile");
 
 const driver = spawn("tauri-driver", [], { stdio: "ignore" });
@@ -58,10 +74,10 @@ try {
   await row.waitForExist({ timeout: 10_000 });
   await row.click();
 
-  const input = await browser.$(".composer input");
-  await input.waitForExist({ timeout: 5_000 });
-  await input.setValue(`echo ${TOKEN}`);
-  await browser.keys("Enter");
+  // Type into the terminal itself, as you would.
+  const textarea = await browser.$(".xterm-helper-textarea");
+  await textarea.waitForExist({ timeout: 10_000 });
+  await textarea.addValue(`echo ${TOKEN}\uE007`);
 
   // The command line plus its output: two occurrences in the real pane.
   await waitFor("tmux to run the command", () => tmux("capture-pane", "-p", "-t", SESSION).split(TOKEN).length > 2);
@@ -127,6 +143,19 @@ try {
   );
   console.log("app: uncommitted change listed in Changes");
 
+  // The plan gate: edits are refused until the human approves in the Card tab.
+  if (gate() !== 2) throw new Error("gate should refuse edits before approval");
+  await (await browser.$("button=Card")).click();
+  const approve = await browser.$("button=Approve plan");
+  await approve.waitForExist({ timeout: 10_000 });
+  await approve.click();
+  await waitFor("the plan to be approved", () => JSON.parse(cardCli(["json"])).meta.plan_approved !== "");
+  if (gate() !== 0) throw new Error("gate should allow edits after approval");
+  await waitFor("the phase strip to show build", async () =>
+    (await browser.execute(() => document.querySelector(".phase .on")?.textContent)) === "build",
+  );
+  console.log("app: approving the plan lifted the edit gate");
+
   await browser.saveScreenshot(`${OUT}app.png`);
   console.log(`screenshot: ${OUT}app.png`);
 } finally {
@@ -134,6 +163,7 @@ try {
   driver.kill();
   if (stateFile) rmSync(stateFile, { force: true });
   rmSync(REPO, { recursive: true, force: true });
+  rmSync(`${REPO}-cards`, { recursive: true, force: true });
   try {
     tmux("kill-session", "-t", SESSION);
   } catch {}

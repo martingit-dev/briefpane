@@ -28,6 +28,10 @@ pub struct Pane {
     path: String,
     width: u16,
     height: u16,
+    /// The title the program set; Claude and Codex put the task name here.
+    title: String,
+    /// `claude` or `codex` when one runs in the pane, judged by process.
+    agent: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -51,7 +55,27 @@ fn tmux(args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-const PANE_FORMAT: &str = "#{session_name}\t#{window_id}\t#{window_index}\t#{window_name}\t#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_width}\t#{pane_height}";
+const PANE_FORMAT: &str = "#{session_name}\t#{window_id}\t#{window_index}\t#{window_name}\t#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{pane_width}\t#{pane_height}\t#{pane_title}\t#{pane_pid}";
+
+const AGENTS: [&str; 2] = ["claude", "codex"];
+
+/// Finds an agent in the pane's shell or its direct children. The command
+/// name alone misleads: Codex runs as `node`.
+fn agent_of(pid: &str) -> Option<String> {
+    let cmdline = |p: &str| std::fs::read(format!("/proc/{p}/cmdline")).unwrap_or_default();
+    let children = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).unwrap_or_default();
+    std::iter::once(pid)
+        .chain(children.split_whitespace())
+        .flat_map(|p| {
+            let raw = cmdline(p);
+            // argv[0] and argv[1]: `claude`, or `node /path/to/codex`.
+            raw.split(|&b| b == 0).take(2).map(|a| String::from_utf8_lossy(a).into_owned()).collect::<Vec<_>>()
+        })
+        .find_map(|arg| {
+            let base = arg.rsplit('/').next().unwrap_or("").to_string();
+            AGENTS.iter().find(|a| base == **a).map(|a| a.to_string())
+        })
+}
 
 #[tauri::command]
 pub fn list_panes() -> Result<Vec<Pane>, String> {
@@ -60,7 +84,7 @@ pub fn list_panes() -> Result<Vec<Pane>, String> {
         .lines()
         .filter_map(|l| {
             let f: Vec<&str> = l.split('\t').collect();
-            (f.len() == 9).then(|| Pane {
+            (f.len() == 11).then(|| Pane {
                 session: f[0].into(),
                 window_id: f[1].into(),
                 window_index: f[2].parse().unwrap_or(0),
@@ -70,6 +94,8 @@ pub fn list_panes() -> Result<Vec<Pane>, String> {
                 path: f[6].into(),
                 width: f[7].parse().unwrap_or(80),
                 height: f[8].parse().unwrap_or(24),
+                title: f[9].into(),
+                agent: agent_of(f[10]),
             })
         })
         .collect())

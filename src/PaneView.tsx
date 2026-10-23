@@ -3,7 +3,12 @@ import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { attach, capture, type Output, type Pane, sendKeys } from "./tmux";
 
-const CELL_RATIO = 0.6; // monospace glyph width per px of font size
+// Monospace cell size per px of font size, used to fit the pane to the view.
+const CELL_W = 0.6;
+const CELL_H = 1.2;
+
+const fit = (el: HTMLElement, cols: number, rows: number) =>
+  Math.max(9, Math.min(15, Math.floor(Math.min(el.clientWidth / (cols * CELL_W), el.clientHeight / (rows * CELL_H)))));
 
 /** A live view of one tmux pane. Sized to the pane, never the reverse. */
 export function PaneView({ pane }: { pane: Pane }) {
@@ -12,11 +17,10 @@ export function PaneView({ pane }: { pane: Pane }) {
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const fontSize = Math.max(9, Math.min(14, Math.floor(el.clientWidth / (pane.width * CELL_RATIO))));
     const term = new Terminal({
       cols: pane.width,
       rows: pane.height,
-      fontSize,
+      fontSize: fit(el, pane.width, pane.height),
       fontFamily: "'JetBrains Mono', 'Geist Mono', ui-monospace, monospace",
       theme: { background: "#0f0e0c", foreground: "#d8d4cd", cursor: "#d8d4cd" },
       scrollback: 0,
@@ -48,12 +52,18 @@ export function PaneView({ pane }: { pane: Pane }) {
         });
     });
 
+    const resize = new ResizeObserver(() => {
+      term.options.fontSize = fit(el, pane.width, pane.height);
+    });
+    resize.observe(el);
+
     const input = term.onData((d) => void sendKeys(pane.session, pane.pane_id, d));
     term.focus();
 
     return () => {
       live = false;
       unlisten?.();
+      resize.disconnect();
       input.dispose();
       term.dispose();
     };

@@ -1,7 +1,9 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PaneView } from "./PaneView";
-import { agentOf, listPanes, type Pane, sendKeys } from "./tmux";
+import { listPanes, type Pane, sendKeys, taskOf } from "./tmux";
+
+const repoOf = (p: Pane) => p.path.split("/").filter(Boolean).pop() ?? p.path;
 
 export default function App() {
   const [panes, setPanes] = useState<Pane[]>([]);
@@ -33,8 +35,8 @@ export default function App() {
 
   // Agents first, then everything else, each grouped by session.
   const groups = useMemo(() => {
-    const agents = panes.filter((p) => agentOf(p));
-    const rest = panes.filter((p) => !agentOf(p));
+    const agents = panes.filter((p) => p.agent);
+    const rest = panes.filter((p) => !p.agent);
     return [
       { label: "Agents", items: agents },
       { label: "Other panes", items: rest },
@@ -70,11 +72,11 @@ export default function App() {
                   className={`task ${p.pane_id === selected ? "on" : ""}`}
                   onClick={() => setSelected(p.pane_id)}
                 >
-                  <span className={`dot ${agentOf(p) ? "agent" : ""}`} />
+                  <span className={`dot ${p.agent ? "agent" : ""}`} />
                   <span className="body">
-                    <span className="t">{p.window_name}</span>
+                    <span className="t">{p.agent ? taskOf(p) : p.window_name}</span>
                     <span className="s">
-                      {agentOf(p) ?? p.command} · {p.session}
+                      {p.agent ?? p.command} · {p.agent ? repoOf(p) : p.session}
                     </span>
                   </span>
                 </button>
@@ -88,7 +90,7 @@ export default function App() {
         {pane ? (
           <>
             <header className="head">
-              <b>{pane.window_name}</b>
+              <b>{pane.agent ? taskOf(pane) : pane.window_name}</b>
               <span className="mono faint">
                 {pane.session}:{pane.window_index} · {pane.path.replace(/^\/home\/[^/]+/, "~")}
               </span>
@@ -100,7 +102,7 @@ export default function App() {
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={`Message ${agentOf(pane) ?? pane.command}…`}
+                placeholder={`Message ${pane.agent ?? pane.command}…`}
               />
               <button className="iconbtn" type="button" title="Voice, transcribed by jane (not wired yet)" disabled>
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">

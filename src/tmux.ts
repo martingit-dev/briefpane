@@ -10,6 +10,8 @@ export type Pane = {
   path: string;
   width: number;
   height: number;
+  title: string;
+  agent: string | null;
 };
 
 export type Snapshot = { text: string; cursor_x: number; cursor_y: number };
@@ -22,10 +24,8 @@ export const attach = (session: string) => invoke<void>("attach", { session });
 export const sendKeys = (session: string, pane: string, data: string) =>
   invoke<void>("send_keys", { session, pane, data });
 
-const AGENTS = ["claude", "codex"];
-
-/** The agent a pane runs, judged by its foreground command. */
-export function agentOf(p: Pane): string | null {
-  const cmd = p.command.toLowerCase();
-  return AGENTS.find((a) => cmd.includes(a)) ?? null;
+/** The task name an agent put in the pane title, without its status glyph. */
+export function taskOf(p: Pane): string {
+  const t = p.title.replace(/^[^\p{L}\p{N}]+/u, "").replace(/\s+\|\s+\S+$/, "");
+  return t || p.window_name;
 }

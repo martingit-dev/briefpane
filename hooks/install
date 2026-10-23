@@ -25,7 +25,8 @@ jq --argjson w "$(h working)" --argjson n "$(h needs-you)" --argjson d "$(h done
   add("UserPromptSubmit"; $w) | add("PostToolUse"; $w) | add("Notification"; $n)
   | add("Stop"; $d) | add("PreToolUse"; $g) | add("SessionStart"; $c)' \
   "$claude" >"$claude.tmp"
-mv "$claude.tmp" "$claude"
+# Written through, not moved: keeps a dotfiles symlink and the file's mode.
+cat "$claude.tmp" >"$claude" && rm "$claude.tmp"
 echo "claude: hooks set in $claude"
 
 codex="$HOME/.codex/config.toml"
@@ -36,7 +37,7 @@ elif grep -q '^notify' "$codex"; then
 else
   [ -f "$codex.bak-briefpane" ] || cp "$codex" "$codex.bak-briefpane"
   { echo 'notify = ["briefpane-hook", "codex", "done"]'; cat "$codex"; } >"$codex.tmp"
-  mv "$codex.tmp" "$codex"
+  cat "$codex.tmp" >"$codex" && rm "$codex.tmp"
   echo "codex: notify set in $codex"
 fi
 echo "Restart running claude and codex sessions to pick this up."

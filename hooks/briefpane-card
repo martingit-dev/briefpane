@@ -82,7 +82,8 @@ function parse(text) {
         .map((l) => l.match(/^- (R\d+) \[(\w+)\] (P\d) (.*?)(?: \| (.*))?$/))
         .filter(Boolean)
         .map((m) => ({ id: m[1], state: m[2], severity: m[3], summary: m[4], note: m[5] ?? "" }));
-    } else if (head in card) card[head] = body;
+    } else if (head === "plan") card.plan = body.replace(/^\\##/gm, "##");
+    else if (head in card) card[head] = body;
   }
   return card;
 }
@@ -200,7 +201,7 @@ switch (cmd) {
   case "plan": {
     const plan = stdin().trim();
     if (!plan) die("pipe the plan in on stdin");
-    if (plan.split("\n").length > MAX_PLAN_LINES) die(`plan has more than ${MAX_PLAN_LINES} lines`);
+    if (plan.split(/\r\n?|\n/).length > MAX_PLAN_LINES) die(`plan has more than ${MAX_PLAN_LINES} lines`);
     card.plan = plan;
     card.meta.plan_approved = "";
     save(loc, card);

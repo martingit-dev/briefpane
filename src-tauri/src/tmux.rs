@@ -1,7 +1,7 @@
 //! Bridges tmux to the window. One control-mode client per tmux session
 //! streams pane output as events; listing and capture use plain `tmux`
-//! calls. Clients attach with `ignore-size` so briefpane never resizes a
-//! pane under the terminal that owns it.
+//! calls. The app is one more tmux client: with tmux's default
+//! `window-size latest`, whichever client you used last sets a window's size.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -44,6 +44,9 @@ struct Output {
 
 #[derive(Serialize)]
 pub struct Snapshot {
+    /// Scrollback above the screen, oldest first.
+    history: String,
+    /// The visible screen, one line per row.
     text: String,
     cursor_x: u16,
     cursor_y: u16,
@@ -155,10 +158,11 @@ pub fn list_panes() -> Result<Vec<Pane>, String> {
 /// live output arrives.
 #[tauri::command]
 pub fn capture(pane: String) -> Result<Snapshot, String> {
+    let history = tmux(&["capture-pane", "-p", "-e", "-S", "-5000", "-E", "-1", "-t", &pane])?;
     let text = tmux(&["capture-pane", "-p", "-e", "-t", &pane])?;
     let cur = tmux(&["display-message", "-p", "-t", &pane, "#{cursor_x} #{cursor_y}"])?;
     let mut it = cur.split_whitespace().map(|n| n.parse().unwrap_or(0));
-    Ok(Snapshot { text, cursor_x: it.next().unwrap_or(0), cursor_y: it.next().unwrap_or(0) })
+    Ok(Snapshot { history, text, cursor_x: it.next().unwrap_or(0), cursor_y: it.next().unwrap_or(0) })
 }
 
 /// Starts streaming a session's panes. Idempotent per session.
@@ -169,7 +173,7 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
         return Ok(());
     }
     let mut child = Command::new("tmux")
-        .args(["-C", "attach-session", "-f", "ignore-size", "-t", &session])
+        .args(["-C", "attach-session", "-t", &session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -213,4 +217,12 @@ pub fn send_keys(state: State<Tmux>, session: String, pane: String, data: String
     let mut clients = state.clients.lock().unwrap();
     let stdin = clients.get_mut(&session).ok_or("session not attached")?;
     stdin.write_all(send_keys_hex(&pane, data.as_bytes()).as_bytes()).map_err(|e| e.to_string())
+}
+
+/// Sets this client's size, so the window fits the view while you use it.
+#[tauri::command]
+pub fn resize(state: State<Tmux>, session: String, cols: u16, rows: u16) -> Result<(), String> {
+    let mut clients = state.clients.lock().unwrap();
+    let stdin = clients.get_mut(&session).ok_or("session not attached")?;
+    stdin.write_all(format!("refresh-client -C {cols}x{rows}\n").as_bytes()).map_err(|e| e.to_string())
 }

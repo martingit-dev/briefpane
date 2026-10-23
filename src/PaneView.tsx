@@ -1,31 +1,32 @@
 import { listen } from "@tauri-apps/api/event";
+import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { attach, capture, type Output, type Pane, sendKeys } from "./tmux";
+import { attach, capture, type Output, type Pane, resize, sendKeys } from "./tmux";
 
-// Monospace cell size per px of font size, used to fit the pane to the view.
-const CELL_W = 0.6;
-const CELL_H = 1.2;
+// tmux needs a moment to resize the window and the program to redraw
+// before the snapshot is worth taking.
+const SETTLE_MS = 120;
 
-const fit = (el: HTMLElement, cols: number, rows: number) =>
-  Math.max(9, Math.min(15, Math.floor(Math.min(el.clientWidth / (cols * CELL_W), el.clientHeight / (rows * CELL_H)))));
-
-/** A live view of one tmux pane. Sized to the pane, never the reverse. */
+/** A live view of one tmux pane that fills its box, like a terminal. */
 export function PaneView({ pane }: { pane: Pane }) {
   const host = useRef<HTMLDivElement>(null);
+  const { session, pane_id } = pane;
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
     const term = new Terminal({
-      cols: pane.width,
-      rows: pane.height,
-      fontSize: fit(el, pane.width, pane.height),
+      fontSize: 13,
+      lineHeight: 1.15,
       fontFamily: "'JetBrains Mono', 'Geist Mono', ui-monospace, monospace",
       theme: { background: "#0f0e0c", foreground: "#d8d4cd", cursor: "#d8d4cd" },
-      scrollback: 0,
+      scrollback: 5000,
     });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
     term.open(el);
+    fit.fit();
 
     let live = true;
     let unlisten: (() => void) | undefined;
@@ -34,40 +35,48 @@ export function PaneView({ pane }: { pane: Pane }) {
 
     // Subscribe before the snapshot so no output falls between the two.
     listen<Output>("pane-output", (e) => {
-      if (e.payload.pane !== pane.pane_id) return;
+      if (e.payload.pane !== pane_id) return;
       const bytes = new Uint8Array(e.payload.data);
       if (primed) term.write(bytes);
       else buffered.push(bytes);
-    }).then((u) => {
+    }).then(async (u) => {
       if (!live) return u();
       unlisten = u;
-      return attach(pane.session)
-        .then(() => capture(pane.pane_id))
-        .then((s) => {
-          if (!live) return;
-          term.write(s.text.replace(/\n$/, "").replaceAll("\n", "\r\n"));
-          term.write(`\x1b[${s.cursor_y + 1};${s.cursor_x + 1}H`);
-          for (const b of buffered) term.write(b);
-          primed = true;
-        });
+      await attach(session);
+      await resize(session, term.cols, term.rows);
+      await new Promise((r) => setTimeout(r, SETTLE_MS));
+      const s = await capture(pane_id);
+      if (!live) return;
+      const crlf = (t: string) => t.replace(/\n$/, "").replaceAll("\n", "\r\n");
+      if (s.history.trim()) term.write(`${crlf(s.history)}\r\n`);
+      term.write(crlf(s.text));
+      term.write(`\x1b[${s.cursor_y + 1};${s.cursor_x + 1}H`);
+      for (const b of buffered) term.write(b);
+      primed = true;
     });
 
-    const resize = new ResizeObserver(() => {
-      term.options.fontSize = fit(el, pane.width, pane.height);
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(pending);
+      pending = setTimeout(() => {
+        fit.fit();
+        void resize(session, term.cols, term.rows).catch(() => {});
+      }, 80);
     });
-    resize.observe(el);
+    observer.observe(el);
 
-    const input = term.onData((d) => void sendKeys(pane.session, pane.pane_id, d));
+    const input = term.onData((d) => void sendKeys(session, pane_id, d));
     term.focus();
 
     return () => {
       live = false;
+      clearTimeout(pending);
       unlisten?.();
-      resize.disconnect();
+      observer.disconnect();
       input.dispose();
       term.dispose();
     };
-  }, [pane.session, pane.pane_id, pane.width, pane.height]);
+  }, [session, pane_id]);
 
   return <div className="paneview" ref={host} />;
 }

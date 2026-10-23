@@ -63,6 +63,10 @@ try {
   });
   console.log("app: output rendered in the pane view");
 
+  // The view owns the size while in use: the 100-column pane grows to fit it.
+  await waitFor("the pane to fit the view", () => Number(tmux("display-message", "-p", "-t", SESSION, "#{pane_width}")) > 100);
+  console.log(`tmux: pane resized to ${tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim()}`);
+
   // A pane running `claude` that its hook marked as waiting moves to Needs you.
   tmux("new-window", "-d", "-t", SESSION, "-n", "agent", "exec -a claude sleep 600");
   const agentPane = tmux("display-message", "-p", "-t", `${SESSION}:agent`, "#{pane_id}").trim();

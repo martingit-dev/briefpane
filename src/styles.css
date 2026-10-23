@@ -224,3 +224,7 @@ button {
   place-items: center;
   color: var(--faint);
 }
+.paneview .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hover) transparent;
+}

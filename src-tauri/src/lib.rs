@@ -9,6 +9,7 @@ pub fn run() {
             tmux::capture,
             tmux::attach,
             tmux::send_keys,
+            tmux::resize,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

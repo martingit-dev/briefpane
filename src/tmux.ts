@@ -22,13 +22,15 @@ export function statusOf(p: Pane): string {
   return p.state?.state ?? "idle";
 }
 
-export type Snapshot = { text: string; cursor_x: number; cursor_y: number };
+export type Snapshot = { history: string; text: string; cursor_x: number; cursor_y: number };
 
 export type Output = { pane: string; data: number[] };
 
 export const listPanes = () => invoke<Pane[]>("list_panes");
 export const capture = (pane: string) => invoke<Snapshot>("capture", { pane });
 export const attach = (session: string) => invoke<void>("attach", { session });
+export const resize = (session: string, cols: number, rows: number) =>
+  invoke<void>("resize", { session, cols, rows });
 export const sendKeys = (session: string, pane: string, data: string) =>
   invoke<void>("send_keys", { session, pane, data });
 

@@ -143,11 +143,12 @@ try {
   console.log("tmux: arrows, Shift+Tab, Esc and Ctrl+C arrive as a terminal sends them");
 
   // The view owns the size while in use: the pane takes the view's columns and rows.
-  const view = await browser.execute(() => `${window.__bpTerm.cols}x${window.__bpTerm.rows}`);
-  await waitFor(
-    "the pane to fit the view",
-    () => tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim() === view,
-  );
+  // Read both sides each time: the view follows tmux and can settle a step later.
+  const viewSize = () => browser.execute(() => `${window.__bpTerm.cols}x${window.__bpTerm.rows}`);
+  const paneSize = () => tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim();
+  await waitFor("the pane to fit the view", async () => paneSize() === (await viewSize())).catch(async (e) => {
+    throw new Error(`${e.message}: view ${await viewSize()}, pane ${paneSize()}`);
+  });
   console.log(
     `tmux: pane resized to ${tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim()}`,
   );
@@ -379,6 +380,10 @@ try {
   await (await browser.$(`button.task[data-pane="${live}"]`)).click();
   await ready(live);
   tmux("detach-client", "-s", SESSION);
+  // The old view's marker goes first; otherwise the stale one would pass the check below.
+  await waitFor("the view to close after the detach", async () =>
+    browser.execute(() => !document.querySelector(".paneview")?.dataset.ready),
+  );
   await waitFor("the view to reopen after the detach", async () =>
     browser.execute((p) => {
       const v = document.querySelector(".paneview");

@@ -84,6 +84,14 @@ impl Streams {
     }
 }
 
+/// The `$N` id of the session named exactly `name`. Every target is built
+/// from it: tmux target lookup matches name prefixes and reads `$N` names
+/// as ids, and prints an empty id for a missing session.
+pub fn session_id(name: &str) -> Result<String, String> {
+    let list = tmux(&["list-sessions", "-F", "#{session_id}\t#{session_name}"])?;
+    id_of(&list, name).ok_or_else(|| format!("no session {name:?}"))
+}
+
 /// The id of the session named exactly `name`, from `list-sessions -F
 /// '#{session_id}\t#{session_name}'`.
 fn id_of(list: &str, name: &str) -> Option<String> {
@@ -330,40 +338,35 @@ pub fn pane_size(pane: &str) -> Result<Size, String> {
 pub fn new_terminal(session: Option<&str>, path: &str) -> Result<String, String> {
     let home = crate::home().to_string_lossy().into_owned();
     let path = if path == "~" { home.as_str() } else { path };
+    let window = |id: &str| {
+        tmux(&[
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-c",
+            path,
+            "-t",
+            &format!("{id}:"),
+        ])
+    };
     let pane = match session {
-        Some(s) => tmux(&[
-            "new-window",
-            "-d",
-            "-P",
-            "-F",
-            "#{pane_id}",
-            "-c",
-            path,
-            "-t",
-            &format!("{s}:"),
-        ])?,
-        None if tmux(&["has-session", "-t", "shells"]).is_err() => tmux(&[
-            "new-session",
-            "-d",
-            "-s",
-            "shells",
-            "-P",
-            "-F",
-            "#{pane_id}",
-            "-c",
-            path,
-        ])?,
-        None => tmux(&[
-            "new-window",
-            "-d",
-            "-P",
-            "-F",
-            "#{pane_id}",
-            "-c",
-            path,
-            "-t",
-            "shells:",
-        ])?,
+        Some(s) => window(&session_id(s)?)?,
+        None => match session_id("shells") {
+            Ok(id) => window(&id)?,
+            Err(_) => tmux(&[
+                "new-session",
+                "-d",
+                "-s",
+                "shells",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-c",
+                path,
+            ])?,
+        },
     };
     Ok(pane.trim().to_string())
 }
@@ -394,8 +397,7 @@ impl Tmux {
         // Matched by name against the session list: tmux target lookup reads
         // `$N` as an id and prints an empty id for a missing session, and
         // `attach -t ""` would join some other session.
-        let list = tmux(&["list-sessions", "-F", "#{session_id}\t#{session_name}"])?;
-        let session_id = id_of(&list, session).ok_or_else(|| format!("no session {session:?}"))?;
+        let session_id = session_id(session)?;
         let mut child = proc::spawn(
             Command::new("tmux")
                 .args(["-C", "attach-session", "-t", &session_id])
@@ -537,9 +539,6 @@ struct Rates {
     panes: HashMap<String, (usize, usize)>,
 }
 
-/// A burst at least this big is reported when it ends, even within a second.
-const REPORT_BURST_BYTES: usize = 64 << 10;
-
 impl Rates {
     fn add(&mut self, pane: &str, bytes: usize) {
         self.since.get_or_insert_with(Instant::now);
@@ -548,16 +547,16 @@ impl Rates {
         r.1 += 1;
     }
 
-    /// One line per pane once a second while busy, and at the end of a
-    /// large burst, which can finish well inside a second.
-    fn report(&mut self, burst_over: bool) {
+    /// One line per pane once a second while busy. The window opens at the
+    /// first frame, so a burst shorter than a second is reported by the next
+    /// frame after it.
+    fn report(&mut self) {
         let Some(since) = self.since else { return };
         let secs = since.elapsed().as_secs_f64();
-        let bytes: usize = self.panes.values().map(|(b, _)| b).sum();
-        if secs < 1.0 && !(burst_over && bytes >= REPORT_BURST_BYTES) {
+        if secs < 1.0 {
             return;
         }
-        let per_s = secs.max(0.001);
+        let per_s = secs;
         for (pane, (bytes, frames)) in self.panes.drain() {
             log::event(
                 "stream",
@@ -626,8 +625,7 @@ fn read(
                 || pending.bytes() >= FLUSH_BYTES
                 || last_flush.elapsed() >= FLUSH_EVERY)
         {
-            let burst_over = reader.buffer().is_empty();
-            flush(&mut pending, streams, tx, &mut rates, burst_over);
+            flush(&mut pending, streams, tx, &mut rates);
             last_flush = Instant::now();
         }
     }
@@ -638,7 +636,6 @@ fn flush(
     streams: &Mutex<Streams>,
     tx: &Sender<Vec<u8>>,
     rates: &mut Rates,
-    burst_over: bool,
 ) {
     let mut sends = Vec::new();
     {
@@ -675,7 +672,7 @@ fn flush(
             s.remove(tx, id);
         }
     }
-    rates.report(burst_over);
+    rates.report();
 }
 
 #[cfg(test)]

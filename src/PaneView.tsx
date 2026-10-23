@@ -19,7 +19,8 @@ const SETTLE_TRIES = 20;
  */
 export function PaneView({ pane }: { pane: Pane }) {
   const host = useRef<HTMLDivElement>(null);
-  const termRef = useRef<{ term: Terminal; fitFont: () => void } | null>(null);
+  // `lost`: tmux resized the pane without a claim of ours, so another client has the size.
+  const termRef = useRef<{ term: Terminal; fitFont: () => void; claimedAt: number; lost: boolean } | null>(null);
   const { session, pane_id } = pane;
   // Bumped when the session's control client ends, which reopens the view.
   const [epoch, setEpoch] = useState(0);
@@ -67,7 +68,8 @@ export function PaneView({ pane }: { pane: Pane }) {
         d = fit.proposeDimensions();
       }
     };
-    termRef.current = { term, fitFont };
+    const handle = { term, fitFont, claimedAt: 0, lost: false };
+    termRef.current = handle;
     fitFont();
 
     let live = true;
@@ -78,6 +80,18 @@ export function PaneView({ pane }: { pane: Pane }) {
     let attached = false;
     const opened = performance.now();
 
+    // Each claim makes tmux report a layout change, which refreshes the pane
+    // list, so the view claims only when its size changed or it lost the size.
+    let claimedSize = "";
+    const claim = (force = false) => {
+      if (!attached || (!force && Date.now() - handle.claimedAt < 1000)) return;
+      const w = wanted();
+      if (!w || (!force && `${w.cols}x${w.rows}` === claimedSize && !handle.lost)) return;
+      claimedSize = `${w.cols}x${w.rows}`;
+      handle.claimedAt = Date.now();
+      handle.lost = false;
+      void resize(session, w.cols, w.rows).catch(() => {});
+    };
     const open = async () => {
       try {
         await attach(session);
@@ -90,8 +104,7 @@ export function PaneView({ pane }: { pane: Pane }) {
         });
         if (!live) return void unwatch(id).catch(() => {});
         watchId = id;
-        const w = wanted();
-        if (w) await resize(session, w.cols, w.rows);
+        claim(true);
         // Wait for the pane's size to stop changing. In a split it never
         // equals what we asked for, so "stable" is the signal, not "equal".
         let size = await paneSize(pane_id);
@@ -128,6 +141,8 @@ export function PaneView({ pane }: { pane: Pane }) {
       buffered.length = 0;
       primed = true;
       el.dataset.ready = pane_id;
+      // The snapshot may have changed the font, and with it the size the view holds.
+      claim(true);
       log("perf", "pane-open", { ms: Math.round(performance.now() - opened), pane: pane_id });
     };
     const fail = (stage: string, err: unknown) => {
@@ -148,27 +163,19 @@ export function PaneView({ pane }: { pane: Pane }) {
       clearTimeout(pending);
       pending = setTimeout(() => {
         fitFont();
-        const w = wanted();
-        if (w && attached) void resize(session, w.cols, w.rows).catch(() => {});
+        claim(true);
       }, 80);
     });
     observer.observe(el);
 
     // With `window-size latest`, typing in another terminal on this session
     // takes the size back. Using the view here claims it again.
-    // Asked at most once a second; tmux ignores a size it already has.
-    let claimed = 0;
-    const claim = () => {
-      if (!attached || Date.now() - claimed < 1000) return;
-      claimed = Date.now();
-      const w = wanted();
-      if (w) void resize(session, w.cols, w.rows).catch(() => {});
-    };
+    const onFocus = () => claim();
     const input = term.onData((d) => {
       claim();
       sendKeys(session, pane_id, d).catch(() => {});
     });
-    term.textarea?.addEventListener("focus", claim);
+    term.textarea?.addEventListener("focus", onFocus);
     term.focus();
 
     return () => {
@@ -177,7 +184,7 @@ export function PaneView({ pane }: { pane: Pane }) {
       if (watchId !== undefined) void unwatch(watchId).catch(() => {});
       observer.disconnect();
       input.dispose();
-      term.textarea?.removeEventListener("focus", claim);
+      term.textarea?.removeEventListener("focus", onFocus);
       termRef.current = null;
       // The host outlives a reopen; its markers describe the view being torn down.
       delete el.dataset.ready;
@@ -190,6 +197,8 @@ export function PaneView({ pane }: { pane: Pane }) {
   useEffect(() => {
     const t = termRef.current;
     if (!t || (t.term.cols === pane.width && t.term.rows === pane.height)) return;
+    // A resize long after our last claim came from another client.
+    if (Date.now() - t.claimedAt > 1500) t.lost = true;
     t.term.resize(pane.width, pane.height);
     t.fitFont();
   }, [pane.width, pane.height]);

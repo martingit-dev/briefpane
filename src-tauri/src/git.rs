@@ -139,6 +139,7 @@ impl Repo {
             branch,
             Some(self.common_dir.join("packed-refs")),
             Some(self.common_dir.join("reftable/tables.list")),
+            Some(self.git_dir.join("reftable/tables.list")),
         ]
         .into_iter()
         .map(|p| p.and_then(|p| stamp(&p)))

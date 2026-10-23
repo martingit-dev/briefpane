@@ -62,10 +62,11 @@ pub struct Cards {
 
 impl Cards {
     /// The task card for the repo and branch at `path`, as
-    /// `briefpane-card json` prints it; `null` when there is none.
+    /// `briefpane-card json` prints it; `null` when there is none, including
+    /// outside a repo, where a shell often sits.
     pub fn card(&self, path: &str) -> Result<Value, String> {
         let Some(head) = head_of(Path::new(path)) else {
-            return Err(format!("{path} is not in a git repo"));
+            return Ok(Value::Null);
         };
         let key = (path.to_string(), head);
         let known = self
@@ -130,7 +131,7 @@ pub fn start_review(
     builder: &str,
 ) -> Result<String, String> {
     pane_id_ok(builder)?;
-    let target = format!("{session}:");
+    let target = format!("{}:", crate::tmux::session_id(session)?);
     // BRIEFPANE_CLAUDE / BRIEFPANE_CODEX point at a different binary.
     let bin = std::env::var(format!("BRIEFPANE_{}", agent.to_uppercase()))
         .unwrap_or_else(|_| agent.to_string());

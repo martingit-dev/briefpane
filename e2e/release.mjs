@@ -54,8 +54,11 @@ try {
     timeout: 15_000,
   });
   // WebKit stops painting an off-screen window and a release build has no
-  // hook on the terminal, so streaming is proven by the app's own stream line.
-  await (await browser.$(".xterm-helper-textarea")).addValue("seq 1 200000\uE007");
+  // hook on the terminal, so streaming is proven by the app's own stream line,
+  // which needs output lasting over a second.
+  await (await browser.$(".xterm-helper-textarea")).addValue(
+    "for i in $(seq 1 30); do seq 1 2000; sleep 0.05; done\uE007",
+  );
   await waitFor("a stream line for the pane", () =>
     readFileSync(process.env.BRIEFPANE_LOG, "utf8")
       .split("\n")

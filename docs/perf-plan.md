@@ -25,7 +25,7 @@ keep their current signature.
 One JSON line per event in `$BRIEFPANE_LOG`, default `/tmp/briefpane/briefpane.jsonl`:
 
     {"t":"2026-10-23T20:40:01.123","src":"rust","kind":"cmd","name":"changes","ms":42.4,"ok":true}
-    {"t":"...","src":"rust","kind":"stream","pane":"%12","bytes_s":5400,"frames_s":30}
+    {"t":"...","src":"rust","kind":"stream","pane":"%12","bytes":5600,"frames":31,"secs":1.04,"bytes_s":5400,"frames_s":30}
     {"t":"...","src":"web","kind":"error","msg":"...","data":{...}}
     {"t":"...","src":"web","kind":"perf","name":"pane-open","ms":180}
 

@@ -9,6 +9,8 @@ import { usePoll } from "./usePoll";
 const repoOf = (p: Pane) => p.path.split("/").filter(Boolean).pop() ?? p.path;
 
 // Sidebar order: what needs you first, shells last.
+const PANES_CHANGED_MS = 1000;
+
 const GROUPS = [
   ["needs-you", "Needs you"],
   ["working", "Working"],
@@ -79,9 +81,25 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const error = actionError ?? pollError;
 
+  // tmux reports a layout change on every resize, and the app resizes as you
+  // use it, so a burst of changes is folded into one refresh a second.
   useEffect(() => {
-    const un = listen("panes-changed", refresh);
+    let last = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const changed = () => {
+      if (timer) return;
+      timer = setTimeout(
+        () => {
+          timer = undefined;
+          last = Date.now();
+          refresh();
+        },
+        Math.max(0, last + PANES_CHANGED_MS - Date.now()),
+      );
+    };
+    const un = listen("panes-changed", changed);
     return () => {
+      clearTimeout(timer);
       un.then((u) => u());
     };
   }, [refresh]);

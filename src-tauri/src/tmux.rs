@@ -173,6 +173,21 @@ pub fn capture(pane: String) -> Result<Snapshot, String> {
     Ok(Snapshot { history, text, cursor_x: next(), cursor_y: next(), width: next(), height: next() })
 }
 
+/// Opens a window running the default shell in `session`, or in `shells` when
+/// no session is given. Returns the new pane's id.
+#[tauri::command]
+pub fn new_terminal(session: Option<String>, path: String) -> Result<String, String> {
+    let path = if path == "~" { std::env::var("HOME").unwrap_or_default() } else { path };
+    let pane = match session {
+        Some(s) => tmux(&["new-window", "-d", "-P", "-F", "#{pane_id}", "-c", &path, "-t", &format!("{s}:")])?,
+        None if tmux(&["has-session", "-t", "shells"]).is_err() => {
+            tmux(&["new-session", "-d", "-s", "shells", "-P", "-F", "#{pane_id}", "-c", &path])?
+        }
+        None => tmux(&["new-window", "-d", "-P", "-F", "#{pane_id}", "-c", &path, "-t", "shells:"])?,
+    };
+    Ok(pane.trim().to_string())
+}
+
 /// Starts streaming a session's panes. Idempotent per session.
 #[tauri::command]
 pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(), String> {

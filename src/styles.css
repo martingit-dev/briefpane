@@ -89,8 +89,15 @@ button {
   opacity: 0.5;
   cursor: default;
 }
+.sidehead {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding-right: 4px;
+}
 .collapse {
-  margin: 2px 4px 2px auto;
+  margin: 2px 0;
 }
 .app.collapsed .collapse {
   margin: 2px auto;

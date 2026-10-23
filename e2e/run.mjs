@@ -196,14 +196,44 @@ try {
   );
   console.log("app: approving the plan lifted the edit gate");
 
-  await browser.saveScreenshot(`${OUT}app.png`);
-  console.log(`screenshot: ${OUT}app.png`);
+  // New terminal opens in the selected pane's repo and the app selects it.
+  const paneIds = () => tmux("list-panes", "-s", "-t", SESSION, "-F", "#{pane_id}").trim().split("\n");
+  const before = new Set(paneIds());
+  const windows = () => tmux("list-windows", "-t", SESSION).trim().split("\n").length;
+  const windowsBefore = windows();
+  await (await browser.$('button[title="New terminal"]')).click();
+  let newPane;
+  await waitFor("a new window in the repo", () => {
+    if (windows() !== windowsBefore + 1) return false;
+    const fresh = tmux("list-panes", "-s", "-t", SESSION, "-F", "#{pane_id}\t#{pane_current_path}")
+      .trim()
+      .split("\n")
+      .map((l) => l.split("\t"))
+      .find(([id]) => !before.has(id));
+    newPane = fresh?.[0];
+    return fresh?.[1] === REPO;
+  });
+  await waitFor("the app to select the new terminal", async () =>
+    (await browser.execute(() => document.querySelector("button.task.on")?.dataset.pane)) === newPane,
+  );
+  console.log("app: new terminal opened in the selected pane's repo");
+
+  // Best effort: WebKit waits for a paint that never comes off screen.
+  const shot = await Promise.race([
+    browser.saveScreenshot(`${OUT}app.png`).then(() => `screenshot: ${OUT}app.png`),
+    sleep(10_000).then(() => "screenshot: skipped, the window is off screen"),
+  ]);
+  console.log(shot);
+} catch (e) {
+  console.error(e);
+  process.exitCode = 1;
 } finally {
-  await browser?.deleteSession().catch(() => {});
+  await Promise.race([browser?.deleteSession().catch(() => {}), sleep(5_000)]);
   driver.kill();
   if (stateFile) rmSync(stateFile, { force: true });
   rmSync(REPO, { recursive: true, force: true });
   rmSync(`${REPO}-cards`, { recursive: true, force: true });
+  process.exit(process.exitCode ?? 0);
   try {
     tmux("kill-session", "-t", SESSION);
   } catch {}

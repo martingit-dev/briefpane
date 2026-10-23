@@ -38,6 +38,7 @@ export const capture = (pane: string) => invoke<Snapshot>("capture", { pane });
 export const attach = (session: string) => invoke<void>("attach", { session });
 export const resize = (session: string, cols: number, rows: number) =>
   invoke<void>("resize", { session, cols, rows });
+export const newTerminal = (session: string | null, path: string) => invoke<string>("new_terminal", { session, path });
 export type FileChange = { name: string; status: string; old: string | null; new: string | null };
 export const brief = (pane: string) => invoke<string | null>("brief", { pane });
 export const changes = (path: string) => invoke<FileChange[]>("changes", { path });

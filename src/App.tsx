@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PaneView } from "./PaneView";
 import { RightPanel } from "./RightPanel";
-import { listPanes, PHASES, type Pane, statusOf, taskOf } from "./tmux";
+import { listPanes, newTerminal, PHASES, type Pane, statusOf, taskOf } from "./tmux";
 import { useCard } from "./useCard";
 
 const repoOf = (p: Pane) => p.path.split("/").filter(Boolean).pop() ?? p.path;
@@ -45,6 +45,14 @@ export default function App() {
   const pane = panes.find((p) => p.pane_id === selected) ?? null;
   const [cardValue, reloadCard] = useCard(pane?.path);
 
+  const openTerminal = () =>
+    newTerminal(pane?.session ?? null, pane?.path ?? "~")
+      .then((id) => {
+        refresh();
+        setSelected(id);
+      })
+      .catch((e) => setError(String(e)));
+
   const groups = useMemo(
     () =>
       GROUPS.map(([status, label]) => ({ status, label, items: panes.filter((p) => statusOf(p) === status) })).filter(
@@ -56,12 +64,22 @@ export default function App() {
   return (
     <div className={`app ${collapsed ? "collapsed" : ""}`}>
       <aside className="side">
-        <button className="iconbtn collapse" type="button" onClick={() => setCollapsed((c) => !c)} title="Toggle sidebar">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3">
-            <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
-            <path d="M6 2.5v11" />
-          </svg>
-        </button>
+        <div className="sidehead">
+          {!collapsed && (
+            <button className="iconbtn newterm" type="button" title="New terminal" onClick={openTerminal}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
+            </button>
+          )}
+          <button className="iconbtn collapse" type="button" onClick={() => setCollapsed((c) => !c)} title="Toggle sidebar">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3">
+              <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
+              <path d="M6 2.5v11" />
+            </svg>
+          </button>
+        </div>
         {!collapsed &&
           groups.map((g) => (
             <section key={g.label}>
@@ -116,9 +134,10 @@ export default function App() {
                 </div>
               )}
               <button className="iconbtn mic" type="button" title="Voice, transcribed by jane (not wired yet)" disabled>
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-                  <rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5" />
-                  <path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2" />
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 19v3" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <rect x="9" y="2" width="6" height="13" rx="3" />
                 </svg>
               </button>
             </header>

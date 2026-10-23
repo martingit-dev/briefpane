@@ -11,6 +11,7 @@ pub fn run() {
             tmux::attach,
             tmux::send_keys,
             tmux::resize,
+            tmux::new_terminal,
             brief::brief,
             brief::changes,
             brief::card,

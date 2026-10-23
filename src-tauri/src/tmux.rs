@@ -44,7 +44,8 @@ struct Client {
 
 /// Which panes of one client stream where. tmux sends every pane's output
 /// to a control client until told otherwise, so an unwatched pane is
-/// turned off the first time it writes.
+/// paused the first time it writes. Paused, not `off`: tmux stops reading a
+/// pane that every client has turned off, which blocks the agent in it.
 #[derive(Default)]
 struct Streams {
     watchers: HashMap<String, Vec<(u64, Channel)>>,
@@ -53,7 +54,7 @@ struct Streams {
 
 impl Streams {
     fn turn(&mut self, tx: &Sender<Vec<u8>>, pane: &str, on: bool) {
-        let flag = if on { "on" } else { "off" };
+        let flag = if on { "continue" } else { "pause" };
         let _ = tx.send(format!("refresh-client -A '{pane}:{flag}'\n").into_bytes());
         if on {
             self.off.remove(pane);
@@ -81,6 +82,13 @@ impl Streams {
         }
         true
     }
+}
+
+fn session_id_of(clients: &Mutex<HashMap<String, Client>>, session: &str) -> String {
+    lock(clients)
+        .get(session)
+        .map(|c| c.session_id.clone())
+        .unwrap_or_default()
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -376,9 +384,20 @@ impl Tmux {
         if lock(&self.clients).contains_key(session) {
             return Ok(());
         }
-        let session_id = tmux(&["display-message", "-p", "-t", session, "#{session_id}"])?
-            .trim()
-            .to_string();
+        // `=` matches the name exactly. A gone session can still print an
+        // empty id, and `attach -t ""` would join some other session.
+        let session_id = tmux(&[
+            "display-message",
+            "-p",
+            "-t",
+            &format!("={session}:"),
+            "#{session_id}",
+        ])?
+        .trim()
+        .to_string();
+        if !session_id.starts_with('$') {
+            return Err(format!("no session {session:?}"));
+        }
         let mut child = proc::spawn(
             Command::new("tmux")
                 .args(["-C", "attach-session", "-t", &session_id])
@@ -414,6 +433,10 @@ impl Tmux {
             );
         }
 
+        log::event(
+            "client",
+            json!({ "session": session, "id": session_id_of(&self.clients, session), "serial": serial }),
+        );
         let who = session.to_string();
         std::thread::spawn(move || {
             for line in rx {
@@ -439,6 +462,10 @@ impl Tmux {
                 }
             }
             let _ = child.wait();
+            log::event(
+                "client-end",
+                json!({ "session": session, "serial": serial }),
+            );
             notify(Notice::Detached(session));
         });
         Ok(())

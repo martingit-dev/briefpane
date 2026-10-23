@@ -80,6 +80,11 @@ const channels = new Map<number, Channel<unknown>>();
 export async function watch(session: string, pane: string, onBytes: (bytes: Uint8Array) => void): Promise<number> {
   const output = new Channel<unknown>();
   output.onmessage = (frame) => {
+    if (__BP_TEST_HOOKS__) {
+      const w = window as unknown as { __bpFrames?: Record<string, number> };
+      w.__bpFrames ??= {};
+      w.__bpFrames[pane] = (w.__bpFrames[pane] ?? 0) + 1;
+    }
     // Raw frames arrive as an ArrayBuffer; a JSON-encoded body would be a number array.
     if (frame instanceof ArrayBuffer) onBytes(new Uint8Array(frame));
     else if (ArrayBuffer.isView(frame)) onBytes(new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength));

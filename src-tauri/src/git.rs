@@ -113,18 +113,47 @@ fn stamp(path: &Path) -> Stamp {
 struct Snapshot {
     status: Vec<u8>,
     stamps: Vec<Stamp>,
+    head: Vec<Stamp>,
     files: Vec<FileChange>,
+}
+
+#[derive(Clone)]
+struct Repo {
+    root: PathBuf,
+    git_dir: PathBuf,
+    common_dir: PathBuf,
+}
+
+impl Repo {
+    /// Stamps of what a commit rewrites: HEAD, the index, the branch ref and
+    /// packed refs. A partial commit leaves the status and the work tree as
+    /// they were but moves HEAD, so the old side of every diff changes.
+    fn head(&self) -> Vec<Stamp> {
+        let head = std::fs::read_to_string(self.git_dir.join("HEAD")).unwrap_or_default();
+        let branch = head
+            .strip_prefix("ref: ")
+            .map(|r| self.common_dir.join(r.trim()));
+        [
+            Some(self.git_dir.join("HEAD")),
+            Some(self.git_dir.join("index")),
+            branch,
+            Some(self.common_dir.join("packed-refs")),
+        ]
+        .into_iter()
+        .map(|p| p.and_then(|p| stamp(&p)))
+        .collect()
+    }
 }
 
 #[derive(Default)]
 pub struct Repos {
-    roots: Mutex<HashMap<String, PathBuf>>,
+    roots: Mutex<HashMap<String, Repo>>,
     last: Mutex<HashMap<PathBuf, Snapshot>>,
 }
 
 impl Repos {
-    /// The repo root containing `path`; `None` outside a repo.
-    fn root(&self, path: &str) -> Result<Option<PathBuf>, Error> {
+    /// The repo containing `path`; `None` outside a repo.
+    fn root(&self, path: &str) -> Result<Option<Repo>, Error> {
         if let Some(r) = self
             .roots
             .lock()
@@ -133,14 +162,32 @@ impl Repos {
         {
             return Ok(Some(r.clone()));
         }
-        match git(Path::new(path), &["rev-parse", "--show-toplevel"]) {
+        let args = [
+            "rev-parse",
+            "--show-toplevel",
+            "--absolute-git-dir",
+            "--git-common-dir",
+        ];
+        match git(Path::new(path), &args) {
             Ok(out) => {
-                let root = PathBuf::from(proc::text(out).trim());
+                let out = proc::text(out);
+                let mut lines = out.lines().map(PathBuf::from);
+                let (Some(root), Some(git_dir), Some(common)) =
+                    (lines.next(), lines.next(), lines.next())
+                else {
+                    return Ok(None);
+                };
+                // `--git-common-dir` may be relative to `path`.
+                let repo = Repo {
+                    common_dir: Path::new(path).join(common),
+                    root,
+                    git_dir,
+                };
                 self.roots
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .insert(path.into(), root.clone());
-                Ok(Some(root))
+                    .insert(path.into(), repo.clone());
+                Ok(Some(repo))
             }
             Err(Error::Failed { .. }) => Ok(None),
             Err(e) => Err(e),
@@ -150,9 +197,10 @@ impl Repos {
     /// Uncommitted changes in the repo containing `path`. Empty outside a
     /// repo; an error when git itself fails.
     pub fn changes(&self, path: &str) -> Result<Vec<FileChange>, Error> {
-        let Some(root) = self.root(path)? else {
+        let Some(repo) = self.root(path)? else {
             return Ok(vec![]);
         };
+        let root = repo.root.clone();
         let status = git(
             &root,
             &["status", "--porcelain", "-z", "--untracked-files=all"],
@@ -169,10 +217,12 @@ impl Repos {
             .take(MAX_FILES)
             .collect();
         let stamps: Vec<Stamp> = entries.iter().map(|e| stamp(&root.join(&e.path))).collect();
+        let head = repo.head();
         let mut last = self.last.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(s) = last.get(&root)
             && s.status == status
             && s.stamps == stamps
+            && s.head == head
         {
             return Ok(s.files.clone());
         }
@@ -184,6 +234,7 @@ impl Repos {
             Snapshot {
                 status,
                 stamps,
+                head,
                 files: files.clone(),
             },
         );
@@ -241,6 +292,66 @@ fn read(root: &Path, entries: &[Entry], stamps: &[Stamp]) -> Result<Vec<FileChan
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A partial commit keeps the status line and the file as they were but
+    /// moves HEAD; the cached diff must pick up the new old side.
+    #[test]
+    fn partial_commit_refreshes_the_cache() {
+        let dir = std::env::temp_dir().join(format!("bp-git-partial-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sh = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(ok.status.success(), "{args:?}: {ok:?}");
+            String::from_utf8(ok.stdout).unwrap()
+        };
+        sh(&["init", "-q"]);
+        std::fs::write(dir.join("f.txt"), "a\nb\nc\n").unwrap();
+        sh(&["add", "."]);
+        sh(&["commit", "-qm", "one"]);
+        std::fs::write(dir.join("f.txt"), "A\nB\nc\n").unwrap();
+
+        let repos = Repos::default();
+        let path = dir.to_str().unwrap();
+        assert_eq!(
+            repos.changes(path).unwrap()[0].old.as_deref(),
+            Some("a\nb\nc\n")
+        );
+
+        // Commit only the first line, as `git add -p && git commit` would.
+        let blob = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["hash-object", "-w", "--stdin"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                use std::io::Write;
+                c.stdin.take().unwrap().write_all(b"A\nb\nc\n")?;
+                c.wait_with_output()
+            })
+            .unwrap();
+        let oid = String::from_utf8(blob.stdout).unwrap();
+        sh(&[
+            "update-index",
+            "--cacheinfo",
+            &format!("100644,{},f.txt", oid.trim()),
+        ]);
+        sh(&["commit", "-qm", "two"]);
+
+        assert_eq!(
+            repos.changes(path).unwrap()[0].old.as_deref(),
+            Some("A\nb\nc\n")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn entry(code: &str, path: &str, orig: Option<&str>) -> Entry {
         Entry {

@@ -2,8 +2,9 @@
 // pane in the sidebar, type into its terminal, prove the text reached tmux
 // and came back into the rendered pane. Saves a screenshot of the window.
 //
-// Needs: tauri-driver on PATH, WebKitWebDriver, and a binary from
-// `pnpm tauri build --debug --no-bundle`.
+// Needs: tauri-driver on PATH, WebKitWebDriver, and the debug binary from
+// `pnpm tauri dev` (served by the dev server) or `pnpm tauri build --debug
+// --no-bundle`; both carry the test hooks, a release build does not.
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -84,6 +85,12 @@ try {
   await row.click();
 
   // Type into the terminal itself, as you would.
+  // Typing during the opening snapshot can paint a line twice (docs/perf-plan.md, known issues).
+  const ready = (pane) =>
+    browser.waitUntil(async () => (await browser.$(`.paneview[data-ready="${pane}"]`)).isExisting(), {
+      timeout: 10_000,
+    });
+  await ready(tmux("display", "-p", "-t", SESSION, "#{pane_id}").trim());
   const textarea = await browser.$(".xterm-helper-textarea");
   await textarea.waitForExist({ timeout: 10_000 });
   await textarea.addValue(`echo ${TOKEN}\uE007`);
@@ -102,6 +109,18 @@ try {
       return out;
     });
     return text.split(TOKEN).length > 2;
+  }).catch(async (e) => {
+    const why = await browser.execute(() => ({
+      frames: window.__bpFrames,
+      rows: window.__bpTerm?.rows,
+      text: (() => {
+        const b = window.__bpTerm?.buffer.active;
+        let out = "";
+        for (let i = 0; b && i < b.length; i++) out += `${b.getLine(i)?.translateToString(true) ?? ""}\n`;
+        return out.trim().slice(-300);
+      })(),
+    }));
+    throw new Error(`${e.message}: ${JSON.stringify(why)}`);
   });
   console.log("app: output rendered in the pane view");
 
@@ -283,9 +302,11 @@ try {
       return false;
     }
   });
-  const afterStart = JSON.parse(cardCli(["json"]));
-  if (afterStart.meta.phase !== "review" || afterStart.meta.builder !== agentPane)
-    throw new Error("review should set phase and builder");
+  // The reviewer window opens before the card is updated.
+  await waitFor("review to set phase and builder", () => {
+    const m = JSON.parse(cardCli(["json"])).meta;
+    return m.phase === "review" && m.builder === agentPane;
+  });
   console.log("app: review started as a fresh read-only claude");
 
   cardCli(["finding", "P1", "Nightly backup lacks the wait"]);
@@ -333,7 +354,7 @@ try {
       "the recreated pane to be selected",
       async () => (await browser.execute(() => document.querySelector("button.task.on")?.dataset.pane)) === id,
     );
-    await sleep(500);
+    await ready(id);
     await (await browser.$(".xterm-helper-textarea")).addValue(`echo ${token}\uE007`);
     await waitFor(`${token} streamed into the view`, async () => (await termText()).split(token).length > 2);
   };

@@ -10,9 +10,10 @@ keep their current signature.
 
 - `attach(session)`: starts the control client. Idempotent.
 - `watch(session, pane, output: Channel<ArrayBuffer>) -> u64`: streams that
-  pane's output as raw byte frames, coalesced per read burst. Turns the pane
-  on with `refresh-client -A '%N:on'`. Replaces the `pane-output` event.
-- `unwatch(id)`: stops that stream; the last watcher turns the pane off.
+  pane's output as raw byte frames, coalesced per read burst. Resumes the pane
+  with `refresh-client -A '%N:continue'`. Replaces the `pane-output` event.
+- `unwatch(id)`: stops that stream; the last watcher pauses the pane
+  (`%N:pause`). Never `off`: tmux stops reading a pane all clients turned off.
 - `pane_size(pane) -> { width, height }`: one `display-message`.
 - `capture(pane)`: unchanged, called once after the size settles.
 - `log(level, msg, data?)`: the frontend's errors and timings into the log.
@@ -42,3 +43,10 @@ busy), `error`, `perf`.
 6. Changes tab: unchanged files are not re-highlighted; data fetched only while the tab is open; the diff code is lazy-loaded.
 7. Pure logic has unit tests: porcelain -z parsing (renames, copies), agent and kind detection, last-answer extraction, pane-line parsing.
 8. `pnpm lint`, `cargo fmt --check`, `cargo clippy -D warnings`, unit tests and `pnpm e2e` pass.
+
+## Known issues
+
+- Output that arrives while a pane's opening snapshot is taken can be painted
+  twice, so typing in the first few hundred ms can garble a line until the
+  next redraw. Fix: request the snapshot through the control client, where
+  tmux orders the reply with `%output`.

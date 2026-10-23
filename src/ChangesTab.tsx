@@ -64,7 +64,7 @@ const NO_FILES: FileChange[] = [];
 
 /** The repo's uncommitted changes. Fetched only while this tab is shown. */
 export default function ChangesTab({ path, onCount }: { path: string; onCount: (n: number | null) => void }) {
-  const { value } = usePoll("changes", () => changes(path), REFRESH_MS, [path]);
+  const { value, error } = usePoll("changes", () => changes(path), REFRESH_MS, [path]);
   const files = value ?? NO_FILES;
   const sides = useStableSides(files);
 
@@ -89,7 +89,9 @@ export default function ChangesTab({ path, onCount }: { path: string; onCount: (
           );
         })
       ) : (
-        <p className="faint">{value ? "No uncommitted changes." : "Loading…"}</p>
+        <p className={error && !value ? "err" : "faint"}>
+          {value ? "No uncommitted changes." : error ? `Could not read changes: ${error}` : "Loading…"}
+        </p>
       )}
     </WorkerPoolContext.Provider>
   );

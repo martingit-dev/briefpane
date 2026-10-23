@@ -11,6 +11,12 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
+/// Rotated at start above this size.
+const MAX_BYTES: u64 = 8 << 20;
+/// A successful command faster than this is not logged: keystrokes and
+/// cache hits would otherwise fill the log.
+const QUIET_MS: f64 = 20.0;
+
 fn file() -> &'static Mutex<Option<File>> {
     static FILE: OnceLock<Mutex<Option<File>>> = OnceLock::new();
     FILE.get_or_init(|| {
@@ -23,6 +29,10 @@ fn file() -> &'static Mutex<Option<File>> {
             .unwrap_or_else(|| PathBuf::from("/tmp/briefpane/briefpane.jsonl"));
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
+        }
+        // /tmp is often RAM: one previous log is kept, the rest goes.
+        if path.metadata().is_ok_and(|m| m.len() > MAX_BYTES) {
+            let _ = std::fs::rename(&path, path.with_extension("jsonl.1"));
         }
         Mutex::new(OpenOptions::new().create(true).append(true).open(path).ok())
     })
@@ -88,6 +98,7 @@ pub fn cmd<T, E: Display>(name: &str, body: impl FnOnce() -> Result<T, E>) -> Re
     let out = body();
     let ms = ms(start);
     match &out {
+        Ok(_) if ms < QUIET_MS => {}
         Ok(_) => event("cmd", json!({ "name": name, "ms": ms, "ok": true })),
         Err(e) => event(
             "cmd",

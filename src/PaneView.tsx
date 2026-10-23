@@ -1,6 +1,7 @@
+import { listen } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { attach, capture, log, type Pane, paneSize, resize, type Snapshot, sendKeys, unwatch, watch } from "./tmux";
 
 const BASE_FONT = 13;
@@ -20,6 +21,14 @@ export function PaneView({ pane }: { pane: Pane }) {
   const host = useRef<HTMLDivElement>(null);
   const termRef = useRef<{ term: Terminal; fitFont: () => void } | null>(null);
   const { session, pane_id } = pane;
+  // Bumped when the session's control client ends, which reopens the view.
+  const [epoch, setEpoch] = useState(0);
+  useEffect(() => {
+    const un = listen<string>("tmux-detached", (e) => {
+      if (e.payload === session) setEpoch((n) => n + 1);
+    });
+    return () => void un.then((u) => u());
+  }, [session]);
 
   // The terminal is built once per pane; the size effect below follows resizes.
   useEffect(() => {
@@ -38,7 +47,7 @@ export function PaneView({ pane }: { pane: Pane }) {
     term.loadAddon(fit);
     term.open(el);
     // The e2e test reads the buffer: WebKit stops painting a window that is off screen.
-    if (import.meta.env.DEV) (window as unknown as { __bpTerm: Terminal }).__bpTerm = term;
+    if (__BP_TEST_HOOKS__) (window as unknown as { __bpTerm: Terminal }).__bpTerm = term;
 
     // What the view holds at the base font: the window size we ask tmux for.
     const wanted = () => {
@@ -65,11 +74,14 @@ export function PaneView({ pane }: { pane: Pane }) {
     let watchId: number | undefined;
     const buffered: Uint8Array[] = [];
     let primed = false;
+    // Resizes wait for the control client; before it exists tmux has no client to size.
+    let attached = false;
     const opened = performance.now();
 
     const open = async () => {
       try {
         await attach(session);
+        attached = true;
         // Watch before the snapshot so no output falls between the two.
         const id = await watch(session, pane_id, (bytes) => {
           if (!live) return;
@@ -115,13 +127,17 @@ export function PaneView({ pane }: { pane: Pane }) {
       for (const b of buffered) term.write(b);
       buffered.length = 0;
       primed = true;
+      el.dataset.ready = pane_id;
       log("perf", "pane-open", { ms: Math.round(performance.now() - opened), pane: pane_id });
     };
     const fail = (stage: string, err: unknown) => {
       if (!live) return;
       // Surfaced on the element so a failed attach is visible, not a blank pane.
       el.dataset.error = String(err);
-      log("error", `pane ${stage} failed`, { session, pane: pane_id, error: String(err) });
+      // A view left on a session that ended has nothing to reopen.
+      if (!String(err).startsWith("no session")) {
+        log("error", `pane ${stage} failed`, { session, pane: pane_id, error: String(err) });
+      }
     };
     void open();
 
@@ -133,7 +149,7 @@ export function PaneView({ pane }: { pane: Pane }) {
       pending = setTimeout(() => {
         fitFont();
         const w = wanted();
-        if (w) void resize(session, w.cols, w.rows).catch(() => {});
+        if (w && attached) void resize(session, w.cols, w.rows).catch(() => {});
       }, 80);
     });
     observer.observe(el);
@@ -143,14 +159,14 @@ export function PaneView({ pane }: { pane: Pane }) {
     // Asked at most once a second; tmux ignores a size it already has.
     let claimed = 0;
     const claim = () => {
-      if (Date.now() - claimed < 1000) return;
+      if (!attached || Date.now() - claimed < 1000) return;
       claimed = Date.now();
       const w = wanted();
       if (w) void resize(session, w.cols, w.rows).catch(() => {});
     };
     const input = term.onData((d) => {
       claim();
-      void sendKeys(session, pane_id, d);
+      sendKeys(session, pane_id, d).catch(() => {});
     });
     term.textarea?.addEventListener("focus", claim);
     term.focus();
@@ -165,7 +181,7 @@ export function PaneView({ pane }: { pane: Pane }) {
       termRef.current = null;
       term.dispose();
     };
-  }, [session, pane_id]);
+  }, [session, pane_id, epoch]);
 
   // Follow the pane when tmux resizes it, from us or from another client.
   useEffect(() => {

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Records an agent's state for Briefpane: one JSON file per tmux pane.
+# Claude: briefpane-hook claude <state>, event JSON on stdin.
+# Codex:  briefpane-hook codex <state> '<event json>' (its notify passes JSON as an argument).
+set -euo pipefail
+[ -n "${TMUX_PANE:-}" ] || exit 0
+agent=$1 state=$2
+if [ $# -ge 3 ]; then event=$3; elif [ ! -t 0 ]; then event=$(cat); else event='{}'; fi
+message=$(jq -r '.message // empty' <<<"$event" 2>/dev/null || true)
+dir="${XDG_STATE_HOME:-$HOME/.local/state}/briefpane/panes"
+mkdir -p "$dir"
+file="$dir/${TMUX_PANE#%}.json"
+jq -n --arg agent "$agent" --arg state "$state" --arg message "$message" --argjson at "$(date +%s)" \
+  '{agent: $agent, state: $state, message: $message, at: $at}' >"$file.tmp"
+mv "$file.tmp" "$file"

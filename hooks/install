@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Wires Claude Code hooks and Codex notify to briefpane-hook. Safe to re-run;
+# backs up both configs first.
+set -euo pipefail
+here=$(dirname "$(readlink -f "$0")")
+ln -sf "$here/briefpane-hook" "$HOME/.local/bin/briefpane-hook"
+
+claude="$HOME/.claude/settings.json"
+cp "$claude" "$claude.bak-briefpane"
+h() { printf '[{"hooks":[{"type":"command","command":"briefpane-hook claude %s"}]}]' "$1"; }
+jq --argjson w "$(h working)" --argjson n "$(h needs-you)" --argjson d "$(h done)" \
+  '.hooks = ((.hooks // {}) + {UserPromptSubmit: $w, PostToolUse: $w, Notification: $n, Stop: $d})' \
+  "$claude.bak-briefpane" >"$claude"
+echo "claude: hooks set in $claude"
+
+codex="$HOME/.codex/config.toml"
+if grep -q '^notify' "$codex"; then
+  echo "codex: notify already set in $codex, left as is"
+else
+  cp "$codex" "$codex.bak-briefpane"
+  { echo 'notify = ["briefpane-hook", "codex", "done"]'; cat "$codex.bak-briefpane"; } >"$codex"
+  echo "codex: notify set in $codex"
+fi
+echo "Restart running claude and codex sessions to pick this up."

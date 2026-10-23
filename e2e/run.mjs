@@ -5,7 +5,7 @@
 // Needs: tauri-driver on PATH, WebKitWebDriver, and a binary from
 // `pnpm tauri build --debug --no-bundle`.
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { remote } from "webdriverio";
 
@@ -33,6 +33,7 @@ tmux("new-session", "-d", "-s", SESSION, "-n", "e2e", "-x", "100", "-y", "30", "
 
 const driver = spawn("tauri-driver", [], { stdio: "ignore" });
 let browser;
+let stateFile;
 try {
   await sleep(1000);
   browser = await remote({
@@ -62,11 +63,29 @@ try {
   });
   console.log("app: output rendered in the pane view");
 
+  // A pane running `claude` that its hook marked as waiting moves to Needs you.
+  tmux("new-window", "-d", "-t", SESSION, "-n", "agent", "exec -a claude sleep 600");
+  const agentPane = tmux("display-message", "-p", "-t", `${SESSION}:agent`, "#{pane_id}").trim();
+  const ask = `Claude needs your permission ${process.pid}`;
+  execFileSync("briefpane-hook", ["claude", "needs-you"], {
+    input: JSON.stringify({ message: ask }),
+    env: { ...process.env, TMUX_PANE: agentPane },
+  });
+  await waitFor("the agent under Needs you", async () => {
+    const groups = await browser.execute(() =>
+      [...document.querySelectorAll(".side section")].map((s) => s.textContent ?? ""),
+    );
+    return groups.some((g) => g.startsWith("Needs you") && g.includes(ask));
+  });
+  console.log("app: waiting agent listed under Needs you");
+  stateFile = `${process.env.HOME}/.local/state/briefpane/panes/${agentPane.slice(1)}.json`;
+
   await browser.saveScreenshot(`${OUT}app.png`);
   console.log(`screenshot: ${OUT}app.png`);
 } finally {
   await browser?.deleteSession().catch(() => {});
   driver.kill();
+  if (stateFile) rmSync(stateFile, { force: true });
   try {
     tmux("kill-session", "-t", SESSION);
   } catch {}

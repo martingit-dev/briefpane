@@ -1,9 +1,19 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PaneView } from "./PaneView";
-import { listPanes, type Pane, sendKeys, taskOf } from "./tmux";
+import { listPanes, type Pane, sendKeys, statusOf, taskOf } from "./tmux";
 
 const repoOf = (p: Pane) => p.path.split("/").filter(Boolean).pop() ?? p.path;
+
+// Sidebar order: what needs you first, shells last.
+const GROUPS = [
+  ["needs-you", "Needs you"],
+  ["working", "Working"],
+  ["done", "Ready"],
+  ["idle", "Agents"],
+  ["service", "Services"],
+  ["terminal", "Terminals"],
+] as const;
 
 export default function App() {
   const [panes, setPanes] = useState<Pane[]>([]);
@@ -33,15 +43,13 @@ export default function App() {
 
   const pane = panes.find((p) => p.pane_id === selected) ?? null;
 
-  // Agents first, then everything else, each grouped by session.
-  const groups = useMemo(() => {
-    const agents = panes.filter((p) => p.agent);
-    const rest = panes.filter((p) => !p.agent);
-    return [
-      { label: "Agents", items: agents },
-      { label: "Other panes", items: rest },
-    ].filter((g) => g.items.length);
-  }, [panes]);
+  const groups = useMemo(
+    () =>
+      GROUPS.map(([status, label]) => ({ status, label, items: panes.filter((p) => statusOf(p) === status) })).filter(
+        (g) => g.items.length,
+      ),
+    [panes],
+  );
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -72,11 +80,13 @@ export default function App() {
                   className={`task ${p.pane_id === selected ? "on" : ""}`}
                   onClick={() => setSelected(p.pane_id)}
                 >
-                  <span className={`dot ${p.agent ? "agent" : ""}`} />
+                  <span className={`dot ${statusOf(p)}`} />
                   <span className="body">
                     <span className="t">{p.agent ? taskOf(p) : p.window_name}</span>
                     <span className="s">
-                      {p.agent ?? p.command} · {p.agent ? repoOf(p) : p.session}
+                      {p.state?.state === "needs-you" && p.state.message
+                        ? p.state.message
+                        : `${p.agent ?? p.command} · ${p.agent ? repoOf(p) : p.session}`}
                     </span>
                   </span>
                 </button>

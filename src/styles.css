@@ -134,9 +134,34 @@ button {
   border: 1.5px solid var(--faint);
   margin: 6px 0 0 3px;
 }
-.dot.agent {
+.dot.needs-you {
+  border: 0;
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgb(215 165 74 / 18%);
+}
+.dot.working {
+  border-style: dashed;
+  border-color: var(--dim);
+  animation: spin 3s linear infinite;
+}
+.dot.done {
   border-color: var(--dim);
   background: var(--dim);
+}
+.dot.idle {
+  border-color: var(--dim);
+}
+.dot.service {
+  border: 0;
+  background: var(--faint);
+}
+.dot.terminal {
+  border-radius: 2px;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .err {
   color: var(--red);

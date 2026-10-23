@@ -8,7 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tmux_cc::{Event, Parser, send_keys_hex};
 
@@ -32,6 +32,8 @@ pub struct Pane {
     title: String,
     /// `claude` or `codex` when one runs in the pane, judged by process.
     agent: Option<String>,
+    kind: Kind,
+    state: Option<AgentState>,
 }
 
 #[derive(Serialize, Clone)]
@@ -59,15 +61,33 @@ const PANE_FORMAT: &str = "#{session_name}\t#{window_id}\t#{window_index}\t#{win
 
 const AGENTS: [&str; 2] = ["claude", "codex"];
 
+const SHELLS: [&str; 5] = ["bash", "zsh", "fish", "sh", "dash"];
+
+/// What a pane is for, judged by its processes: an agent you talk to, a
+/// service you watch, or a bare shell.
+#[derive(Serialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Agent,
+    Service,
+    Terminal,
+}
+
+fn children(pid: &str) -> Vec<String> {
+    std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(String::from)
+        .collect()
+}
+
 /// Finds an agent in the pane's shell or its direct children. The command
 /// name alone misleads: Codex runs as `node`.
-fn agent_of(pid: &str) -> Option<String> {
-    let cmdline = |p: &str| std::fs::read(format!("/proc/{p}/cmdline")).unwrap_or_default();
-    let children = std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children")).unwrap_or_default();
+fn agent_of(pid: &str, kids: &[String]) -> Option<String> {
     std::iter::once(pid)
-        .chain(children.split_whitespace())
+        .chain(kids.iter().map(String::as_str))
         .flat_map(|p| {
-            let raw = cmdline(p);
+            let raw = std::fs::read(format!("/proc/{p}/cmdline")).unwrap_or_default();
             // argv[0] and argv[1]: `claude`, or `node /path/to/codex`.
             raw.split(|&b| b == 0).take(2).map(|a| String::from_utf8_lossy(a).into_owned()).collect::<Vec<_>>()
         })
@@ -77,6 +97,23 @@ fn agent_of(pid: &str) -> Option<String> {
         })
 }
 
+/// What `briefpane-hook` last recorded for a pane.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AgentState {
+    state: String,
+    #[serde(default)]
+    message: String,
+    at: u64,
+}
+
+fn state_of(pane_id: &str) -> Option<AgentState> {
+    let dir = std::env::var("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/state"));
+    let raw = std::fs::read(dir.join("briefpane/panes").join(format!("{}.json", pane_id.trim_start_matches('%')))).ok()?;
+    serde_json::from_slice(&raw).ok()
+}
+
 #[tauri::command]
 pub fn list_panes() -> Result<Vec<Pane>, String> {
     let out = tmux(&["list-panes", "-a", "-F", PANE_FORMAT])?;
@@ -84,7 +121,18 @@ pub fn list_panes() -> Result<Vec<Pane>, String> {
         .lines()
         .filter_map(|l| {
             let f: Vec<&str> = l.split('\t').collect();
-            (f.len() == 11).then(|| Pane {
+            if f.len() != 11 {
+                return None;
+            }
+            let kids = children(f[10]);
+            let agent = agent_of(f[10], &kids);
+            let kind = match &agent {
+                Some(_) => Kind::Agent,
+                None if kids.is_empty() && SHELLS.contains(&f[5]) => Kind::Terminal,
+                None => Kind::Service,
+            };
+            let state = agent.as_ref().and_then(|_| state_of(f[4]));
+            Some(Pane {
                 session: f[0].into(),
                 window_id: f[1].into(),
                 window_index: f[2].parse().unwrap_or(0),
@@ -95,7 +143,9 @@ pub fn list_panes() -> Result<Vec<Pane>, String> {
                 width: f[7].parse().unwrap_or(80),
                 height: f[8].parse().unwrap_or(24),
                 title: f[9].into(),
-                agent: agent_of(f[10]),
+                agent,
+                kind,
+                state,
             })
         })
         .collect())

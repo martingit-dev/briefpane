@@ -12,7 +12,15 @@ export type Pane = {
   height: number;
   title: string;
   agent: string | null;
+  kind: "agent" | "service" | "terminal";
+  state: { state: "working" | "needs-you" | "done"; message: string; at: number } | null;
 };
+
+/** Where a pane sits in the sidebar: agents by state, then services, then shells. */
+export function statusOf(p: Pane): string {
+  if (p.kind !== "agent") return p.kind;
+  return p.state?.state ?? "idle";
+}
 
 export type Snapshot = { text: string; cursor_x: number; cursor_y: number };
 

@@ -19,7 +19,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 const PHASES = ["define", "plan", "build", "verify", "review", "ship"];
 const SEVERITIES = ["P0", "P1", "P2"];
@@ -87,13 +87,22 @@ function parse(text) {
   return card;
 }
 
+/** One line with no control characters: a newline would forge frontmatter or a section. */
+const line = (v) => String(v).replace(/[\x00-\x1f\x7f\u2028\u2029]+/g, " ").trim();
+
 function render(c) {
   const meta = Object.entries(c.meta)
-    .map(([k, v]) => `${k}: ${v}`)
+    .map(([k, v]) => `${k}: ${line(v)}`)
     .join("\n");
-  const proof = c.proof.map((p) => `- [${p.done ? "x" : " "}] ${p.claim}${p.evidence ? ` | ${p.evidence}` : ""}`).join("\n");
-  const review = c.review.map((r) => `- ${r.id} [${r.state}] ${r.severity} ${r.summary}${r.note ? ` | ${r.note}` : ""}`).join("\n");
-  return `---\n${meta}\n---\n\n## Define\n${c.define}\n\n## Plan\n${c.plan}\n\n## Proof\n${proof}\n\n## Review\n${review}\n\n## Next\n${c.next}\n`;
+  const proof = c.proof
+    .map((p) => `- [${p.done ? "x" : " "}] ${line(p.claim)}${p.evidence ? ` | ${line(p.evidence)}` : ""}`)
+    .join("\n");
+  const review = c.review
+    .map((r) => `- ${r.id} [${r.state}] ${r.severity} ${line(r.summary)}${r.note ? ` | ${line(r.note)}` : ""}`)
+    .join("\n");
+  // The plan is the one multi-line field; a line starting with `## ` would open a section.
+  const plan = c.plan.replace(/^##/gm, "\\##");
+  return `---\n${meta}\n---\n\n## Define\n${line(c.define)}\n\n## Plan\n${plan}\n\n## Proof\n${proof}\n\n## Review\n${review}\n\n## Next\n${line(c.next)}\n`;
 }
 
 function load(loc) {
@@ -150,7 +159,12 @@ if (cmd === "gate" || cmd === "context") {
   try {
     event = JSON.parse(stdin() || "{}");
   } catch {}
-  const loc = locate(event.cwd ?? cwd);
+  // The edited file decides the card, not the agent's cwd: an edit can reach another repo.
+  const target = event.tool_input?.file_path ?? event.tool_input?.notebook_path;
+  let dir = target ? dirname(resolve(event.cwd ?? cwd, target)) : (event.cwd ?? cwd);
+  // A new file may sit in a folder that does not exist yet.
+  while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
+  const loc = locate(dir);
   if (!loc || !existsSync(loc.path)) process.exit(0);
   const c = load(loc);
   if (cmd === "context") {

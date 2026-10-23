@@ -6,15 +6,29 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tmux_cc::{Event, Parser, send_keys_hex};
 
+/// Live control-mode clients by session name. Each carries a serial so a
+/// reader thread only removes its own client, not a newer one for a
+/// recreated session of the same name.
 #[derive(Default)]
 pub struct Tmux {
-    clients: Mutex<HashMap<String, ChildStdin>>,
+    clients: Arc<Mutex<HashMap<String, (u64, ChildStdin)>>>,
+    serial: AtomicU64,
+}
+
+/// A tmux pane id such as `%12`. Anything else is refused: the id is
+/// written into a control-mode command line, where `;` starts a new command.
+pub fn pane_id_ok(pane: &str) -> Result<(), String> {
+    match pane.strip_prefix('%') {
+        Some(n) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => Ok(()),
+        _ => Err(format!("not a pane id: {pane:?}")),
+    }
 }
 
 #[derive(Serialize)]
@@ -270,7 +284,12 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
         .spawn()
         .map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
-    clients.insert(session.clone(), child.stdin.take().ok_or("no stdin")?);
+    let serial = state.serial.fetch_add(1, Ordering::Relaxed);
+    clients.insert(
+        session.clone(),
+        (serial, child.stdin.take().ok_or("no stdin")?),
+    );
+    let registry = Arc::clone(&state.clients);
 
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
@@ -304,6 +323,13 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
                 _ => {}
             }
         }
+        // The session is gone: forget the client so the next attach starts afresh.
+        {
+            let mut clients = registry.lock().unwrap();
+            if clients.get(&session).is_some_and(|(s, _)| *s == serial) {
+                clients.remove(&session);
+            }
+        }
         let _ = child.wait();
         let _ = app.emit("tmux-detached", session);
     });
@@ -317,8 +343,9 @@ pub fn send_keys(
     pane: String,
     data: String,
 ) -> Result<(), String> {
+    pane_id_ok(&pane)?;
     let mut clients = state.clients.lock().unwrap();
-    let stdin = clients.get_mut(&session).ok_or("session not attached")?;
+    let (_, stdin) = clients.get_mut(&session).ok_or("session not attached")?;
     stdin
         .write_all(send_keys_hex(&pane, data.as_bytes()).as_bytes())
         .map_err(|e| e.to_string())
@@ -328,8 +355,22 @@ pub fn send_keys(
 #[tauri::command]
 pub fn resize(state: State<Tmux>, session: String, cols: u16, rows: u16) -> Result<(), String> {
     let mut clients = state.clients.lock().unwrap();
-    let stdin = clients.get_mut(&session).ok_or("session not attached")?;
+    let (_, stdin) = clients.get_mut(&session).ok_or("session not attached")?;
     stdin
         .write_all(format!("refresh-client -C {cols}x{rows}\n").as_bytes())
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pane_id_ok;
+
+    #[test]
+    fn pane_ids_only() {
+        assert!(pane_id_ok("%0").is_ok());
+        assert!(pane_id_ok("%123").is_ok());
+        for bad in ["", "%", "0", "%1 ; run-shell x", "%1\n", "%a"] {
+            assert!(pane_id_ok(bad).is_err(), "{bad:?}");
+        }
+    }
 }

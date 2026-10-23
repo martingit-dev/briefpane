@@ -170,6 +170,7 @@ pub fn start_review(
     agent: String,
     builder: String,
 ) -> Result<String, String> {
+    crate::tmux::pane_id_ok(&builder)?;
     let mut cmd: Vec<&str> = vec![
         "tmux",
         "new-window",

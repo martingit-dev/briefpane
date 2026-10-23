@@ -310,6 +310,35 @@ try {
   );
   console.log("app: verdicts saved and the fix sent to the building agent");
 
+  // A session killed and recreated under the same name streams again.
+  const AGAIN = `${SESSION}-again`;
+  const termText = () =>
+    browser.execute(() => {
+      const b = window.__bpTerm?.buffer.active;
+      let out = "";
+      for (let i = 0; b && i < b.length; i++) out += `${b.getLine(i)?.translateToString(true) ?? ""}\n`;
+      return out;
+    });
+  const openAgain = async (token) => {
+    const id = tmux("new-session", "-d", "-P", "-F", "#{pane_id}", "-s", AGAIN, "bash --norc --noprofile").trim();
+    const r = await browser.$(`button.task[data-pane="${id}"]`);
+    await r.waitForExist({ timeout: 10_000 });
+    await r.click();
+    await waitFor(
+      "the recreated pane to be selected",
+      async () => (await browser.execute(() => document.querySelector("button.task.on")?.dataset.pane)) === id,
+    );
+    await sleep(500);
+    await (await browser.$(".xterm-helper-textarea")).addValue(`echo ${token}\uE007`);
+    await waitFor(`${token} streamed into the view`, async () => (await termText()).split(token).length > 2);
+  };
+  await openAgain(`${TOKEN}-a`);
+  tmux("kill-session", "-t", AGAIN);
+  await sleep(1000);
+  await openAgain(`${TOKEN}-b`);
+  tmux("kill-session", "-t", AGAIN);
+  console.log("app: a recreated session streams again");
+
   // Best effort: WebKit waits for a paint that never comes off screen.
   const shot = await Promise.race([
     browser.saveScreenshot(`${OUT}app.png`).then(() => `screenshot: ${OUT}app.png`),
@@ -326,6 +355,9 @@ try {
   rmSync(REPO, { recursive: true, force: true });
   rmSync(`${REPO}-cards`, { recursive: true, force: true });
   rmSync(stub, { recursive: true, force: true });
+  try {
+    tmux("kill-session", "-t", `${SESSION}-again`);
+  } catch {}
   try {
     tmux("kill-session", "-t", SESSION);
   } catch {}

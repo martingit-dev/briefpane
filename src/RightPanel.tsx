@@ -15,11 +15,12 @@ import {
 } from "./tmux";
 
 const REFRESH_MS = 3000;
-/** What the building agent is told: the findings the human marked fix. */
+/** What the building agent is told: the findings the human marked fix. Control
+ * characters are dropped, since this is typed into the agent as keystrokes. */
 const fixMessage = (fixes: Card["review"]) =>
   `Fix these review findings, then re-run the proof and update the card: ${fixes
     .map((r) => `${r.id} (${r.severity}) ${r.summary}`)
-    .join("; ")}`;
+    .join("; ")}`.replace(/\p{Cc}+/gu, " ");
 
 const STATE_LABEL = { "needs-you": "Needs you", working: "Working", done: "Ready" } as const;
 const DIFF_OPTIONS = {

@@ -1,30 +1,42 @@
 #!/usr/bin/env bash
-# Wires Claude Code hooks and Codex notify to briefpane-hook. Safe to re-run;
-# backs up both configs first.
+# Wires Claude Code hooks and Codex notify to briefpane-hook. Safe to re-run:
+# adds to existing hooks and backs up each config once.
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 ln -sf "$here/briefpane-hook" "$HOME/.local/bin/briefpane-hook"
 ln -sf "$here/briefpane-card" "$HOME/.local/bin/briefpane-card"
 
 claude="$HOME/.claude/settings.json"
-cp "$claude" "$claude.bak-briefpane"
-h() { printf '[{"hooks":[{"type":"command","command":"briefpane-hook claude %s"}]}]' "$1"; }
+[ -f "$claude" ] || echo '{}' >"$claude"
+# The first backup is the pre-briefpane original; later runs keep it.
+[ -f "$claude.bak-briefpane" ] || cp "$claude" "$claude.bak-briefpane"
+h() { printf '{"hooks":[{"type":"command","command":"briefpane-hook claude %s"}]}' "$1"; }
 # The plan gate refuses file edits while the branch's card is unapproved;
 # SessionStart prints the card back after startup, resume or compaction.
-gate='[{"matcher":"Edit|Write|MultiEdit|NotebookEdit","hooks":[{"type":"command","command":"briefpane-card gate"}]}]'
-context='[{"hooks":[{"type":"command","command":"briefpane-card context"}]}]'
+gate='{"matcher":"Edit|Write|MultiEdit|NotebookEdit","hooks":[{"type":"command","command":"briefpane-card gate"}]}'
+context='{"hooks":[{"type":"command","command":"briefpane-card context"}]}'
+# Adds each briefpane entry to its event's list, next to the user's own
+# hooks, unless that command is already there.
 jq --argjson w "$(h working)" --argjson n "$(h needs-you)" --argjson d "$(h done)" \
-  --argjson g "$gate" --argjson c "$context" \
-  '.hooks = ((.hooks // {}) + {UserPromptSubmit: $w, PostToolUse: $w, Notification: $n, Stop: $d, PreToolUse: $g, SessionStart: $c})' \
-  "$claude.bak-briefpane" >"$claude"
+  --argjson g "$gate" --argjson c "$context" '
+  def add($event; $entry):
+    .hooks[$event] = ((.hooks[$event] // []) as $list
+      | if any($list[].hooks[]?; .command == $entry.hooks[0].command) then $list else $list + [$entry] end);
+  add("UserPromptSubmit"; $w) | add("PostToolUse"; $w) | add("Notification"; $n)
+  | add("Stop"; $d) | add("PreToolUse"; $g) | add("SessionStart"; $c)' \
+  "$claude" >"$claude.tmp"
+mv "$claude.tmp" "$claude"
 echo "claude: hooks set in $claude"
 
 codex="$HOME/.codex/config.toml"
-if grep -q '^notify' "$codex"; then
+if [ ! -f "$codex" ]; then
+  echo "codex: no $codex, skipped"
+elif grep -q '^notify' "$codex"; then
   echo "codex: notify already set in $codex, left as is"
 else
-  cp "$codex" "$codex.bak-briefpane"
-  { echo 'notify = ["briefpane-hook", "codex", "done"]'; cat "$codex.bak-briefpane"; } >"$codex"
+  [ -f "$codex.bak-briefpane" ] || cp "$codex" "$codex.bak-briefpane"
+  { echo 'notify = ["briefpane-hook", "codex", "done"]'; cat "$codex"; } >"$codex.tmp"
+  mv "$codex.tmp" "$codex"
   echo "codex: notify set in $codex"
 fi
 echo "Restart running claude and codex sessions to pick this up."

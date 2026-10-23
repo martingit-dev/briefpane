@@ -6,11 +6,24 @@
 #[derive(Debug, PartialEq)]
 pub enum Event {
     /// Bytes a pane wrote to its terminal, already unescaped.
-    Output { pane: String, data: Vec<u8> },
-    WindowAdd { window: String },
-    WindowClose { window: String },
-    WindowRenamed { window: String, name: String },
-    SessionChanged { session: String, name: String },
+    Output {
+        pane: String,
+        data: Vec<u8>,
+    },
+    WindowAdd {
+        window: String,
+    },
+    WindowClose {
+        window: String,
+    },
+    WindowRenamed {
+        window: String,
+        name: String,
+    },
+    SessionChanged {
+        session: String,
+        name: String,
+    },
     /// A line inside a `%begin`/`%end` block.
     Reply(String),
     /// tmux detached this client; carries the reason when given.
@@ -46,7 +59,10 @@ impl Parser {
         }
         if let Some(rest) = raw.strip_prefix(b"%output ") {
             let (pane, data) = split_word(rest);
-            return Some(Event::Output { pane: text(pane), data: unescape(data) });
+            return Some(Event::Output {
+                pane: text(pane),
+                data: unescape(data),
+            });
         }
         let s = String::from_utf8_lossy(raw);
         let mut words = s.splitn(3, ' ');
@@ -57,8 +73,15 @@ impl Parser {
             "%window-add" => Event::WindowAdd { window: a },
             "%window-close" | "%unlinked-window-close" => Event::WindowClose { window: a },
             "%window-renamed" => Event::WindowRenamed { window: a, name: b },
-            "%session-changed" => Event::SessionChanged { session: a, name: b },
-            "%exit" => Event::Exit(if a.is_empty() { None } else { Some(format!("{a} {b}").trim().to_string()) }),
+            "%session-changed" => Event::SessionChanged {
+                session: a,
+                name: b,
+            },
+            "%exit" => Event::Exit(if a.is_empty() {
+                None
+            } else {
+                Some(format!("{a} {b}").trim().to_string())
+            }),
             _ => Event::Other(s.into_owned()),
         })
     }
@@ -80,7 +103,10 @@ pub fn unescape(s: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(s.len());
     let mut i = 0;
     while i < s.len() {
-        if s[i] == b'\\' && i + 3 < s.len() && s[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+        if s[i] == b'\\'
+            && i + 3 < s.len()
+            && s[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
+        {
             out.push((s[i + 1] - b'0') * 64 + (s[i + 2] - b'0') * 8 + (s[i + 3] - b'0'));
             i += 4;
         } else {
@@ -93,8 +119,43 @@ pub fn unescape(s: &[u8]) -> Vec<u8> {
 
 /// Formats bytes for `send-keys -H`, which takes each byte as a hex word.
 pub fn send_keys_hex(pane: &str, data: &[u8]) -> String {
-    let hex: Vec<String> = data.iter().map(|b| format!("{b:02x}")).collect();
-    format!("send-keys -t {pane} -H {}\n", hex.join(" "))
+    use std::fmt::Write;
+    let mut line = String::with_capacity(20 + data.len() * 3);
+    let _ = write!(line, "send-keys -t {pane} -H");
+    for b in data {
+        let _ = write!(line, " {b:02x}");
+    }
+    line.push('\n');
+    line
+}
+
+/// Collects pane output between flushes so each pane gets one frame per
+/// read burst instead of one per `%output` line.
+#[derive(Default)]
+pub struct Coalescer {
+    frames: Vec<(String, Vec<u8>)>,
+    bytes: usize,
+}
+
+impl Coalescer {
+    pub fn push(&mut self, pane: String, data: Vec<u8>) {
+        self.bytes += data.len();
+        match self.frames.iter_mut().find(|(p, _)| *p == pane) {
+            Some((_, buf)) => buf.extend_from_slice(&data),
+            None => self.frames.push((pane, data)),
+        }
+    }
+
+    /// Bytes held since the last flush.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    /// One frame per pane, in the order each pane first wrote.
+    pub fn take(&mut self) -> Vec<(String, Vec<u8>)> {
+        self.bytes = 0;
+        std::mem::take(&mut self.frames)
+    }
 }
 
 #[cfg(test)]
@@ -105,14 +166,26 @@ mod tests {
     fn output_is_unescaped() {
         let mut p = Parser::new();
         let e = p.line(br"%output %3 hi\015\012a\134b").unwrap();
-        assert_eq!(e, Event::Output { pane: "%3".into(), data: b"hi\r\na\\b".to_vec() });
+        assert_eq!(
+            e,
+            Event::Output {
+                pane: "%3".into(),
+                data: b"hi\r\na\\b".to_vec()
+            }
+        );
     }
 
     #[test]
     fn utf8_passes_through() {
         let mut p = Parser::new();
         let e = p.line("%output %1 ● ok".as_bytes()).unwrap();
-        assert_eq!(e, Event::Output { pane: "%1".into(), data: "● ok".as_bytes().to_vec() });
+        assert_eq!(
+            e,
+            Event::Output {
+                pane: "%1".into(),
+                data: "● ok".as_bytes().to_vec()
+            }
+        );
     }
 
     #[test]
@@ -121,14 +194,19 @@ mod tests {
         assert_eq!(p.line(b"%begin 1792731501 650959 1"), None);
         assert_eq!(
             p.line(b"0: api (1 panes) [211x56] [layout 31a6,211x56,0,0,173] @135"),
-            Some(Event::Reply("0: api (1 panes) [211x56] [layout 31a6,211x56,0,0,173] @135".into()))
+            Some(Event::Reply(
+                "0: api (1 panes) [211x56] [layout 31a6,211x56,0,0,173] @135".into()
+            ))
         );
         // a line that looks like a notification is still part of the reply
         assert!(matches!(p.line(b"%output %9 x"), Some(Event::Reply(_))));
         assert_eq!(p.line(b"%end 1792731501 650959 1"), None);
         assert_eq!(
             p.line(b"%session-changed $48 heya"),
-            Some(Event::SessionChanged { session: "$48".into(), name: "heya".into() })
+            Some(Event::SessionChanged {
+                session: "$48".into(),
+                name: "heya".into()
+            })
         );
         assert_eq!(p.line(b"%exit"), Some(Event::Exit(None)));
     }
@@ -141,6 +219,28 @@ mod tests {
 
     #[test]
     fn hex_keys() {
-        assert_eq!(send_keys_hex("%3", b"ls\r"), "send-keys -t %3 -H 6c 73 0d\n");
+        assert_eq!(
+            send_keys_hex("%3", b"ls\r"),
+            "send-keys -t %3 -H 6c 73 0d\n"
+        );
+        assert_eq!(
+            send_keys_hex("%3", &[0x00, 0xff]),
+            "send-keys -t %3 -H 00 ff\n"
+        );
+    }
+
+    #[test]
+    fn coalesces_per_pane() {
+        let mut c = Coalescer::default();
+        c.push("%1".into(), b"ab".to_vec());
+        c.push("%2".into(), b"x".to_vec());
+        c.push("%1".into(), b"c".to_vec());
+        assert_eq!(c.bytes(), 4);
+        assert_eq!(
+            c.take(),
+            vec![("%1".into(), b"abc".to_vec()), ("%2".into(), b"x".to_vec())]
+        );
+        assert_eq!(c.bytes(), 0);
+        assert!(c.take().is_empty());
     }
 }

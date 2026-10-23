@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PaneView } from "./PaneView";
 import { RightPanel } from "./RightPanel";
-import { listPanes, newTerminal, PHASES, type Pane, statusOf, taskOf } from "./tmux";
+import { listPanes, newTerminal, type Pane, PHASES, statusOf, taskOf } from "./tmux";
 import { useCard } from "./useCard";
 
 const repoOf = (p: Pane) => p.path.split("/").filter(Boolean).pop() ?? p.path;
@@ -66,15 +66,50 @@ export default function App() {
       <aside className="side">
         <div className="sidehead">
           {!collapsed && (
+            <span className="brand">
+              <svg aria-hidden="true" viewBox="0 0 64 64" width="16" height="16">
+                <path
+                  fill="currentColor"
+                  fillRule="evenodd"
+                  d="M11 16L21 6V24H43A10 10 0 0 1 53 34V48A10 10 0 0 1 43 58H11Z M21 34H43V48H21Z"
+                />
+              </svg>
+              Briefpane
+            </span>
+          )}
+          {!collapsed && (
             <button className="iconbtn newterm" type="button" title="New terminal" onClick={openTerminal}>
-              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                width="15"
+                height="15"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M5 12h14" />
                 <path d="M12 5v14" />
               </svg>
             </button>
           )}
-          <button className="iconbtn collapse" type="button" onClick={() => setCollapsed((c) => !c)} title="Toggle sidebar">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3">
+          <button
+            className="iconbtn collapse"
+            type="button"
+            onClick={() => setCollapsed((c) => !c)}
+            title="Toggle sidebar"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.3"
+            >
               <rect x="1.5" y="2.5" width="13" height="11" rx="2" />
               <path d="M6 2.5v11" />
             </svg>
@@ -134,7 +169,17 @@ export default function App() {
                 </div>
               )}
               <button className="iconbtn mic" type="button" title="Voice, transcribed by jane (not wired yet)" disabled>
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  width="15"
+                  height="15"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M12 19v3" />
                   <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                   <rect x="9" y="2" width="6" height="13" rx="3" />

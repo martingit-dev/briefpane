@@ -22,6 +22,7 @@ export function PaneView({ pane }: { pane: Pane }) {
   const termRef = useRef<{ term: Terminal; fitFont: () => void } | null>(null);
   const { session, pane_id } = pane;
 
+  // The terminal is built once per pane; the size effect below follows resizes.
   useEffect(() => {
     const el = host.current;
     if (!el) return;
@@ -97,7 +98,7 @@ export function PaneView({ pane }: { pane: Pane }) {
         if (s.history.trim()) term.write(`${lines(s.history).join("\r\n")}\r\n`);
         // Scroll history out of view, then paint each screen row in place.
         term.write("\r\n".repeat(term.rows));
-        lines(s.text).forEach((line, row) => term.write(`\x1b[${row + 1};1H${line}\x1b[0m`));
+        for (const [row, line] of lines(s.text).entries()) term.write(`\x1b[${row + 1};1H${line}\x1b[0m`);
         term.write(`\x1b[${s.cursor_y + 1};${s.cursor_x + 1}H`);
         for (const b of buffered) term.write(b);
         primed = true;
@@ -132,7 +133,6 @@ export function PaneView({ pane }: { pane: Pane }) {
       termRef.current = null;
       term.dispose();
     };
-    // Size changes are followed below without remounting the terminal.
   }, [session, pane_id]);
 
   // Follow the pane when tmux resizes it, from us or from another client.

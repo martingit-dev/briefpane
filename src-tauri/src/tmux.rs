@@ -56,7 +56,10 @@ pub struct Snapshot {
 }
 
 fn tmux(args: &[&str]) -> Result<String, String> {
-    let out = Command::new("tmux").args(args).output().map_err(|e| e.to_string())?;
+    let out = Command::new("tmux")
+        .args(args)
+        .output()
+        .map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
@@ -95,7 +98,10 @@ fn agent_of(pid: &str, kids: &[String]) -> Option<String> {
         .flat_map(|p| {
             let raw = std::fs::read(format!("/proc/{p}/cmdline")).unwrap_or_default();
             // argv[0] and argv[1]: `claude`, or `node /path/to/codex`.
-            raw.split(|&b| b == 0).take(2).map(|a| String::from_utf8_lossy(a).into_owned()).collect::<Vec<_>>()
+            raw.split(|&b| b == 0)
+                .take(2)
+                .map(|a| String::from_utf8_lossy(a).into_owned())
+                .collect::<Vec<_>>()
         })
         .find_map(|arg| {
             let base = arg.rsplit('/').next().unwrap_or("").to_string();
@@ -119,8 +125,14 @@ pub struct AgentState {
 pub fn state_of(pane_id: &str) -> Option<AgentState> {
     let dir = std::env::var("XDG_STATE_HOME")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/state"));
-    let raw = std::fs::read(dir.join("briefpane/panes").join(format!("{}.json", pane_id.trim_start_matches('%')))).ok()?;
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/state")
+        });
+    let raw = std::fs::read(
+        dir.join("briefpane/panes")
+            .join(format!("{}.json", pane_id.trim_start_matches('%'))),
+    )
+    .ok()?;
     serde_json::from_slice(&raw).ok()
 }
 
@@ -165,25 +177,80 @@ pub fn list_panes() -> Result<Vec<Pane>, String> {
 /// live output arrives.
 #[tauri::command]
 pub fn capture(pane: String) -> Result<Snapshot, String> {
-    let history = tmux(&["capture-pane", "-p", "-e", "-S", "-5000", "-E", "-1", "-t", &pane])?;
+    let history = tmux(&[
+        "capture-pane",
+        "-p",
+        "-e",
+        "-S",
+        "-5000",
+        "-E",
+        "-1",
+        "-t",
+        &pane,
+    ])?;
     let text = tmux(&["capture-pane", "-p", "-e", "-t", &pane])?;
-    let cur = tmux(&["display-message", "-p", "-t", &pane, "#{cursor_x} #{cursor_y} #{pane_width} #{pane_height}"])?;
+    let cur = tmux(&[
+        "display-message",
+        "-p",
+        "-t",
+        &pane,
+        "#{cursor_x} #{cursor_y} #{pane_width} #{pane_height}",
+    ])?;
     let mut it = cur.split_whitespace().map(|n| n.parse().unwrap_or(0));
     let mut next = || it.next().unwrap_or(0);
-    Ok(Snapshot { history, text, cursor_x: next(), cursor_y: next(), width: next(), height: next() })
+    Ok(Snapshot {
+        history,
+        text,
+        cursor_x: next(),
+        cursor_y: next(),
+        width: next(),
+        height: next(),
+    })
 }
 
 /// Opens a window running the default shell in `session`, or in `shells` when
 /// no session is given. Returns the new pane's id.
 #[tauri::command]
 pub fn new_terminal(session: Option<String>, path: String) -> Result<String, String> {
-    let path = if path == "~" { std::env::var("HOME").unwrap_or_default() } else { path };
+    let path = if path == "~" {
+        std::env::var("HOME").unwrap_or_default()
+    } else {
+        path
+    };
     let pane = match session {
-        Some(s) => tmux(&["new-window", "-d", "-P", "-F", "#{pane_id}", "-c", &path, "-t", &format!("{s}:")])?,
-        None if tmux(&["has-session", "-t", "shells"]).is_err() => {
-            tmux(&["new-session", "-d", "-s", "shells", "-P", "-F", "#{pane_id}", "-c", &path])?
-        }
-        None => tmux(&["new-window", "-d", "-P", "-F", "#{pane_id}", "-c", &path, "-t", "shells:"])?,
+        Some(s) => tmux(&[
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-c",
+            &path,
+            "-t",
+            &format!("{s}:"),
+        ])?,
+        None if tmux(&["has-session", "-t", "shells"]).is_err() => tmux(&[
+            "new-session",
+            "-d",
+            "-s",
+            "shells",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-c",
+            &path,
+        ])?,
+        None => tmux(&[
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-c",
+            &path,
+            "-t",
+            "shells:",
+        ])?,
     };
     Ok(pane.trim().to_string())
 }
@@ -223,7 +290,11 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
                     let _ = app.emit("pane-output", Output { pane, data });
                 }
                 Some(Event::Exit(_)) => break,
-                Some(Event::WindowAdd { .. } | Event::WindowClose { .. } | Event::WindowRenamed { .. }) => {
+                Some(
+                    Event::WindowAdd { .. }
+                    | Event::WindowClose { .. }
+                    | Event::WindowRenamed { .. },
+                ) => {
                     let _ = app.emit("panes-changed", ());
                 }
                 // Pane sizes changed: a split, or another client took over the size.
@@ -240,10 +311,17 @@ pub fn attach(app: AppHandle, state: State<Tmux>, session: String) -> Result<(),
 }
 
 #[tauri::command]
-pub fn send_keys(state: State<Tmux>, session: String, pane: String, data: String) -> Result<(), String> {
+pub fn send_keys(
+    state: State<Tmux>,
+    session: String,
+    pane: String,
+    data: String,
+) -> Result<(), String> {
     let mut clients = state.clients.lock().unwrap();
     let stdin = clients.get_mut(&session).ok_or("session not attached")?;
-    stdin.write_all(send_keys_hex(&pane, data.as_bytes()).as_bytes()).map_err(|e| e.to_string())
+    stdin
+        .write_all(send_keys_hex(&pane, data.as_bytes()).as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 /// Sets this client's size, so the window fits the view while you use it.
@@ -251,5 +329,7 @@ pub fn send_keys(state: State<Tmux>, session: String, pane: String, data: String
 pub fn resize(state: State<Tmux>, session: String, cols: u16, rows: u16) -> Result<(), String> {
     let mut clients = state.clients.lock().unwrap();
     let stdin = clients.get_mut(&session).ok_or("session not attached")?;
-    stdin.write_all(format!("refresh-client -C {cols}x{rows}\n").as_bytes()).map_err(|e| e.to_string())
+    stdin
+        .write_all(format!("refresh-client -C {cols}x{rows}\n").as_bytes())
+        .map_err(|e| e.to_string())
 }

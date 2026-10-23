@@ -2,7 +2,17 @@ import { MultiFileDiff } from "@pierre/diffs/react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useEffect, useMemo, useState } from "react";
-import { approvePlan, brief, type Card, changes, dispose, type FileChange, type Pane, sendKeys, startReview } from "./tmux";
+import {
+  approvePlan,
+  brief,
+  type Card,
+  changes,
+  dispose,
+  type FileChange,
+  type Pane,
+  sendKeys,
+  startReview,
+} from "./tmux";
 
 const REFRESH_MS = 3000;
 /** What the building agent is told: the findings the human marked fix. */
@@ -12,7 +22,12 @@ const fixMessage = (fixes: Card["review"]) =>
     .join("; ")}`;
 
 const STATE_LABEL = { "needs-you": "Needs you", working: "Working", done: "Ready" } as const;
-const DIFF_OPTIONS = { theme: { dark: "min-dark", light: "min-light" }, themeType: "dark", diffStyle: "unified", overflow: "wrap" } as const;
+const DIFF_OPTIONS = {
+  theme: { dark: "min-dark", light: "min-light" },
+  themeType: "dark",
+  diffStyle: "unified",
+  overflow: "wrap",
+} as const;
 
 /** The agent's last answer, rendered, and the repo's uncommitted changes. */
 export function RightPanel({ pane, card, reloadCard }: { pane: Pane; card: Card | null; reloadCard: () => void }) {
@@ -108,7 +123,10 @@ export function RightPanel({ pane, card, reloadCard }: { pane: Pane; card: Card 
               </section>
               <section>
                 <div className="cap">
-                  Proof <span className="faint">{card.proof.filter((p) => p.done).length} of {card.proof.length}</span>
+                  Proof{" "}
+                  <span className="faint">
+                    {card.proof.filter((p) => p.done).length} of {card.proof.length}
+                  </span>
                 </div>
                 {card.proof.length ? (
                   card.proof.map((p, i) => (
@@ -143,7 +161,11 @@ export function RightPanel({ pane, card, reloadCard }: { pane: Pane; card: Card 
                           type="button"
                           key={v}
                           className={`btn ${r.state === v ? "pri" : ""}`}
-                          onClick={() => dispose(pane.path, r.id, v).then(reloadCard).catch((e) => setActionError(String(e)))}
+                          onClick={() =>
+                            dispose(pane.path, r.id, v)
+                              .then(reloadCard)
+                              .catch((e) => setActionError(String(e)))
+                          }
                         >
                           {v}
                         </button>

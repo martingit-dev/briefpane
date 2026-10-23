@@ -41,11 +41,13 @@ writeFileSync(`${REPO}/hello.txt`, "one\nthree\n");
 
 // Cards for this run go to a scratch folder; the app inherits this through tauri-driver.
 process.env.BRIEFPANE_CARDS = `${REPO}-cards`;
-const cardCli = (args, input) =>
-  execFileSync("briefpane-card", [...args, "--cwd", REPO], { input, encoding: "utf8" });
+const cardCli = (args, input) => execFileSync("briefpane-card", [...args, "--cwd", REPO], { input, encoding: "utf8" });
 const gate = () => {
   try {
-    execFileSync("briefpane-card", ["gate"], { input: JSON.stringify({ cwd: REPO }), stdio: ["pipe", "ignore", "ignore"] });
+    execFileSync("briefpane-card", ["gate"], {
+      input: JSON.stringify({ cwd: REPO }),
+      stdio: ["pipe", "ignore", "ignore"],
+    });
     return 0;
   } catch (e) {
     return e.status;
@@ -110,13 +112,21 @@ try {
     return ["^[[A", "^[[B", "^[[Z", "^["].every((k) => shown.includes(k));
   });
   await browser.keys(["Control", "c", "Control"]);
-  await waitFor("Ctrl+C to end cat", () => tmux("display-message", "-p", "-t", SESSION, "#{pane_current_command}").trim() === "bash");
+  await waitFor(
+    "Ctrl+C to end cat",
+    () => tmux("display-message", "-p", "-t", SESSION, "#{pane_current_command}").trim() === "bash",
+  );
   console.log("tmux: arrows, Shift+Tab, Esc and Ctrl+C arrive as a terminal sends them");
 
   // The view owns the size while in use: the pane takes the view's columns and rows.
   const view = await browser.execute(() => `${window.__bpTerm.cols}x${window.__bpTerm.rows}`);
-  await waitFor("the pane to fit the view", () => tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim() === view);
-  console.log(`tmux: pane resized to ${tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim()}`);
+  await waitFor(
+    "the pane to fit the view",
+    () => tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim() === view,
+  );
+  console.log(
+    `tmux: pane resized to ${tmux("display-message", "-p", "-t", SESSION, "#{pane_width}x#{pane_height}").trim()}`,
+  );
 
   // A pane running `claude` that its hook marked as waiting moves to Needs you.
   tmux("new-window", "-d", "-t", SESSION, "-n", "agent", "-c", REPO, "exec -a claude sleep 600");
@@ -136,15 +146,20 @@ try {
   stateFile = `${process.env.HOME}/.local/state/briefpane/panes/${agentPane.slice(1)}.json`;
 
   // Its answer renders as markdown in the Brief tab.
-  execFileSync("briefpane-hook", ["codex", "done", JSON.stringify({ "last-assistant-message": "## All green\n\nRan `pnpm e2e`." })], {
-    env: { ...process.env, TMUX_PANE: agentPane },
-  });
+  execFileSync(
+    "briefpane-hook",
+    ["codex", "done", JSON.stringify({ "last-assistant-message": "## All green\n\nRan `pnpm e2e`." })],
+    {
+      env: { ...process.env, TMUX_PANE: agentPane },
+    },
+  );
   await waitFor("the agent row", async () => (await browser.$$("button.task")).length > 0);
   await browser.execute((pane) => {
     for (const b of document.querySelectorAll("button.task")) if (b.dataset.pane === pane) b.click();
   }, agentPane);
-  await waitFor("the brief to render", async () =>
-    (await browser.execute(() => document.querySelector(".md h2")?.textContent)) === "All green",
+  await waitFor(
+    "the brief to render",
+    async () => (await browser.execute(() => document.querySelector(".md h2")?.textContent)) === "All green",
   );
   console.log("app: agent's answer rendered as markdown");
 
@@ -156,11 +171,23 @@ try {
   // Reopening a pane whose screen ends in blank rows puts the cursor where
   // tmux has it, not shifted by the blank rows.
   await waitFor("the reopened view to match tmux's cursor", async () => {
-    const [x, y] = tmux("display-message", "-p", "-t", SESSION, "#{cursor_x} #{cursor_y}").trim().split(" ").map(Number);
+    const [x, y] = tmux("display-message", "-p", "-t", SESSION, "#{cursor_x} #{cursor_y}")
+      .trim()
+      .split(" ")
+      .map(Number);
     const tmuxLine = tmux("capture-pane", "-p", "-t", SESSION).split("\n")[y].trimEnd();
     const view = await browser.execute(() => {
       const b = window.__bpTerm?.buffer.active;
-      return b && { x: b.cursorX, y: b.cursorY, line: b.getLine(b.viewportY + b.cursorY)?.translateToString(true).trimEnd() };
+      return (
+        b && {
+          x: b.cursorX,
+          y: b.cursorY,
+          line: b
+            .getLine(b.viewportY + b.cursorY)
+            ?.translateToString(true)
+            .trimEnd(),
+        }
+      );
     });
     return view && view.x === x && view.y === y && view.line === tmuxLine;
   });
@@ -170,18 +197,25 @@ try {
   // pane's own size, or output lands on the wrong rows.
   tmux("split-window", "-d", "-h", "-t", `${SESSION}:e2e`, "bash --norc --noprofile");
   await waitFor("the view to follow the split pane's size", async () => {
-    const [w, h] = tmux("display-message", "-p", "-t", `${SESSION}:e2e.0`, "#{pane_width} #{pane_height}").trim().split(" ").map(Number);
+    const [w, h] = tmux("display-message", "-p", "-t", `${SESSION}:e2e.0`, "#{pane_width} #{pane_height}")
+      .trim()
+      .split(" ")
+      .map(Number);
     const v = await browser.execute(() => [window.__bpTerm.cols, window.__bpTerm.rows]);
     return v[0] === w && v[1] === h;
   });
-  console.log(`app: view follows the split pane at ${tmux("display-message", "-p", "-t", `${SESSION}:e2e.0`, "#{pane_width}x#{pane_height}").trim()}`);
+  console.log(
+    `app: view follows the split pane at ${tmux("display-message", "-p", "-t", `${SESSION}:e2e.0`, "#{pane_width}x#{pane_height}").trim()}`,
+  );
   await (await browser.$("button=Changes")).click();
   // The diff renders in a shadow root; read the edited line from there.
   await waitFor("the diff of hello.txt", async () =>
-    (await browser.execute(() => {
-      const host = document.querySelector('.file[data-file="hello.txt"] diffs-container');
-      return host?.shadowRoot?.textContent ?? "";
-    })).includes("three"),
+    (
+      await browser.execute(() => {
+        const host = document.querySelector('.file[data-file="hello.txt"] diffs-container');
+        return host?.shadowRoot?.textContent ?? "";
+      })
+    ).includes("three"),
   );
   console.log("app: uncommitted change listed in Changes");
 
@@ -193,8 +227,9 @@ try {
   await approve.click();
   await waitFor("the plan to be approved", () => JSON.parse(cardCli(["json"])).meta.plan_approved !== "");
   if (gate() !== 0) throw new Error("gate should allow edits after approval");
-  await waitFor("the phase strip to show build", async () =>
-    (await browser.execute(() => document.querySelector(".phase .on")?.textContent)) === "build",
+  await waitFor(
+    "the phase strip to show build",
+    async () => (await browser.execute(() => document.querySelector(".phase .on")?.textContent)) === "build",
   );
   console.log("app: approving the plan lifted the edit gate");
 
@@ -215,8 +250,9 @@ try {
     newPane = fresh?.[0];
     return fresh?.[1] === REPO;
   });
-  await waitFor("the app to select the new terminal", async () =>
-    (await browser.execute(() => document.querySelector("button.task.on")?.dataset.pane)) === newPane,
+  await waitFor(
+    "the app to select the new terminal",
+    async () => (await browser.execute(() => document.querySelector("button.task.on")?.dataset.pane)) === newPane,
   );
   console.log("app: new terminal opened in the selected pane's repo");
 
@@ -235,13 +271,16 @@ try {
   await waitFor("the reviewer to start read-only", () => {
     try {
       const args = readFileSync(`${stub}/args`, "utf8");
-      return args.includes("--disallowedTools") && args.includes("Edit,Write") && args.includes("briefpane-card finding");
+      return (
+        args.includes("--disallowedTools") && args.includes("Edit,Write") && args.includes("briefpane-card finding")
+      );
     } catch {
       return false;
     }
   });
   const afterStart = JSON.parse(cardCli(["json"]));
-  if (afterStart.meta.phase !== "review" || afterStart.meta.builder !== agentPane) throw new Error("review should set phase and builder");
+  if (afterStart.meta.phase !== "review" || afterStart.meta.builder !== agentPane)
+    throw new Error("review should set phase and builder");
   console.log("app: review started as a fresh read-only claude");
 
   cardCli(["finding", "P1", "Nightly backup lacks the wait"]);
@@ -250,7 +289,8 @@ try {
     browser.execute(
       (id, v) => {
         for (const f of document.querySelectorAll(".finding"))
-          if (f.textContent.includes(id)) for (const b of f.querySelectorAll("button")) if (b.textContent === v) b.click();
+          if (f.textContent.includes(id))
+            for (const b of f.querySelectorAll("button")) if (b.textContent === v) b.click();
       },
       id,
       v,

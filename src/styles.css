@@ -96,6 +96,19 @@ button {
   gap: 2px;
   padding-right: 4px;
 }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  padding-left: 10px;
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--fg);
+}
+.brand svg {
+  color: var(--amber);
+}
 .collapse {
   margin: 2px 0;
 }
@@ -229,8 +242,11 @@ button {
 .paneview {
   height: 100%;
 }
-.paneview .xterm-viewport {
-  background: var(--term) !important;
+/* Beats the inline background xterm sets from its theme. */
+.app .paneview .xterm-viewport {
+  background: var(--term);
+  scrollbar-width: thin;
+  scrollbar-color: var(--hover) transparent;
 }
 
 .empty {
@@ -238,10 +254,6 @@ button {
   display: grid;
   place-items: center;
   color: var(--faint);
-}
-.paneview .xterm-viewport {
-  scrollbar-width: thin;
-  scrollbar-color: var(--hover) transparent;
 }
 
 .right {

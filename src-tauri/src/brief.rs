@@ -27,7 +27,9 @@ pub fn brief(pane: String) -> Option<String> {
     let file = std::fs::File::open(&state.transcript).ok()?;
     let mut last = None;
     for line in BufReader::new(file).lines().map_while(Result::ok) {
-        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         if v["type"] != "assistant" {
             continue;
         }
@@ -55,7 +57,12 @@ pub struct FileChange {
 }
 
 fn git(dir: &str, args: &[&str]) -> Option<Vec<u8>> {
-    let out = Command::new("git").arg("-C").arg(dir).args(args).output().ok()?;
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .ok()?;
     out.status.success().then_some(out.stdout)
 }
 
@@ -63,9 +70,16 @@ fn git(dir: &str, args: &[&str]) -> Option<Vec<u8>> {
 /// file. Empty when `path` is not in a git repo.
 #[tauri::command]
 pub fn changes(path: String) -> Vec<FileChange> {
-    let Some(root) = git(&path, &["rev-parse", "--show-toplevel"]) else { return vec![] };
+    let Some(root) = git(&path, &["rev-parse", "--show-toplevel"]) else {
+        return vec![];
+    };
     let root = String::from_utf8_lossy(&root).trim().to_string();
-    let Some(status) = git(&root, &["status", "--porcelain", "-z", "--untracked-files=all"]) else { return vec![] };
+    let Some(status) = git(
+        &root,
+        &["status", "--porcelain", "-z", "--untracked-files=all"],
+    ) else {
+        return vec![];
+    };
     let text = |b: Vec<u8>| String::from_utf8(b).ok();
     // With -z a rename is two entries, `R  new` then `old`; drop the old name.
     let mut entries = Vec::new();
@@ -91,20 +105,35 @@ pub fn changes(path: String) -> Vec<FileChange> {
             }
             .to_string();
             let on_disk = std::path::Path::new(&root).join(&name);
-            let small = on_disk.metadata().map(|m| m.len() <= MAX_FILE).unwrap_or(true);
+            let small = on_disk
+                .metadata()
+                .map(|m| m.len() <= MAX_FILE)
+                .unwrap_or(true);
             let old = (small && status != "?" && status != "A")
                 .then(|| git(&root, &["show", &format!("HEAD:{name}")]).and_then(text))
                 .flatten();
-            let new = (small && status != "D").then(|| std::fs::read(&on_disk).ok().and_then(text)).flatten();
-            FileChange { name, status, old, new }
+            let new = (small && status != "D")
+                .then(|| std::fs::read(&on_disk).ok().and_then(text))
+                .flatten();
+            FileChange {
+                name,
+                status,
+                old,
+                new,
+            }
         })
         .collect()
 }
 
 fn card_cli(path: &str, args: &[&str]) -> Result<String, String> {
     // A desktop launch may not have ~/.local/bin on PATH.
-    let local = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/bin/briefpane-card");
-    let bin = if local.exists() { local } else { "briefpane-card".into() };
+    let local = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join(".local/bin/briefpane-card");
+    let bin = if local.exists() {
+        local
+    } else {
+        "briefpane-card".into()
+    };
     let out = Command::new(bin)
         .args(args)
         .args(["--cwd", path])
@@ -135,18 +164,43 @@ const REVIEW_PROMPT: &str = "Review this change with fresh eyes. Read the task c
 /// reviewing the repo at `path` against its card. Claude runs with edits
 /// disallowed; Codex is told not to edit. Returns the new pane id.
 #[tauri::command]
-pub fn start_review(session: String, path: String, agent: String, builder: String) -> Result<String, String> {
-    let mut cmd: Vec<&str> = vec!["tmux", "new-window", "-d", "-P", "-F", "#{pane_id}", "-n", "review", "-c", &path];
+pub fn start_review(
+    session: String,
+    path: String,
+    agent: String,
+    builder: String,
+) -> Result<String, String> {
+    let mut cmd: Vec<&str> = vec![
+        "tmux",
+        "new-window",
+        "-d",
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "-n",
+        "review",
+        "-c",
+        &path,
+    ];
     let target = format!("{session}:");
     cmd.extend(["-t", &target]);
     // BRIEFPANE_CLAUDE / BRIEFPANE_CODEX point at a different binary.
-    let bin = std::env::var(format!("BRIEFPANE_{}", agent.to_uppercase())).unwrap_or_else(|_| agent.clone());
+    let bin = std::env::var(format!("BRIEFPANE_{}", agent.to_uppercase()))
+        .unwrap_or_else(|_| agent.clone());
     match agent.as_str() {
-        "claude" => cmd.extend([bin.as_str(), "--disallowedTools", "Edit,Write,MultiEdit,NotebookEdit", REVIEW_PROMPT]),
+        "claude" => cmd.extend([
+            bin.as_str(),
+            "--disallowedTools",
+            "Edit,Write,MultiEdit,NotebookEdit",
+            REVIEW_PROMPT,
+        ]),
         "codex" => cmd.extend([bin.as_str(), REVIEW_PROMPT]),
         other => return Err(format!("no reviewer for {other}")),
     }
-    let out = Command::new(cmd[0]).args(&cmd[1..]).output().map_err(|e| e.to_string())?;
+    let out = Command::new(cmd[0])
+        .args(&cmd[1..])
+        .output()
+        .map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
